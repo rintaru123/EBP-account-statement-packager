@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Сборщик выписки (v1.29)</title>
+    <title>Сборщик выписки (v1.30)</title>
     <style>
         body { font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif; max-width: 900px; margin: 30px auto; background-color: #f4f6f9; color: #333; }
         .container { background: white; padding: 40px; border-radius: 16px; box-shadow: 0 10px 30px rgba(0,0,0,0.05); }
@@ -74,7 +74,7 @@
 <body>
 
     <div class="container">
-        <h1>🛠 Сборщик выписки <span style="font-size: 0.6em; color: #adb5bd; vertical-align: middle;">v1.29</span></h1>
+        <h1>🛠 Сборщик выписки <span style="font-size: 0.6em; color: #adb5bd; vertical-align: middle;">v1.30</span></h1>
         <div class="subtitle">
             Синхронизация GUID (подмена в выписке), строгий фильтр КБК, 
             формирование двух файлов (Приложение + Обновленная выписка).
@@ -121,7 +121,7 @@
 
     <script>
         // === Configuration ===
-        const APP_VERSION = "v1.29";
+        const APP_VERSION = "v1.30";
 
         // === State ===
         const Data = {
@@ -763,6 +763,68 @@
             a.download = name;
             a.click();
         }
+        // === UPDATE CHECKER ===
+        const GITHUB_USERNAME = "rintaru123";
+        const REPO_NAME = "EBP-account-statement-packager"; // <-- ВПИШИ СЮДА ИМЯ РЕПОЗИТОРИЯ
+        const VERSION_JSON_URL = `https://${GITHUB_USERNAME}.github.io/${REPO_NAME}/version.json`;
+
+        async function checkForUpdates() {
+            try {
+                // Добавляем timestamp, чтобы браузер не кешировал JSON и всегда брал свежий
+                const response = await fetch(VERSION_JSON_URL + '?t=' + new Date().getTime());
+                if (!response.ok) return;
+
+                const data = await response.json();
+                const latestVersion = data.version;
+
+                // Простая проверка (строгое неравенство)
+                // Если текущая версия в коде (APP_VERSION) не совпадает с той, что в интернете
+                if (latestVersion !== APP_VERSION) {
+                    showUpdateNotification(latestVersion, data.message, data.download_url);
+                } else {
+                    console.log("У вас последняя версия:", APP_VERSION);
+                }
+            } catch (e) {
+                console.warn("Не удалось проверить обновления:", e);
+            }
+        }
+
+        function showUpdateNotification(ver, msg, url) {
+            // Создаем красивую плашку уведомления
+            const div = document.createElement('div');
+            div.style.cssText = `
+                position: fixed; bottom: 20px; right: 20px; 
+                background: #fff; border-left: 5px solid #0d6efd;
+                padding: 15px 20px; border-radius: 8px;
+                box-shadow: 0 5px 20px rgba(0,0,0,0.2);
+                font-family: "Segoe UI", sans-serif; z-index: 1000;
+                animation: slideIn 0.5s ease-out;
+            `;
+            
+            div.innerHTML = `
+                <div style="font-weight:bold; font-size:16px; margin-bottom:5px; color:#333;">
+                    Доступна новая версия: <span style="color:#0d6efd">${ver}</span>
+                </div>
+                <div style="font-size:13px; color:#666; margin-bottom:10px;">${msg}</div>
+                <a href="${url}" target="_blank" style="
+                    display:inline-block; background:#0d6efd; color:white; 
+                    text-decoration:none; padding:6px 12px; border-radius:4px; 
+                    font-size:13px; font-weight:600;">Скачать обновление</a>
+                <button onclick="this.parentElement.remove()" style="
+                    background:none; border:none; color:#999; cursor:pointer; 
+                    margin-left:10px; font-size:12px;">Закрыть</button>
+            `;
+            
+            // Добавляем анимацию
+            const style = document.createElement('style');
+            style.innerHTML = `@keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }`;
+            document.head.appendChild(style);
+            
+            document.body.appendChild(div);
+        }
+
+        // Запускаем проверку при загрузке страницы
+        checkForUpdates();
     </script>
 </body>
 </html>
