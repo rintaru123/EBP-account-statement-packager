@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Сборщик выписки (v1.27)</title>
+    <title>Сборщик выписки (v1.29)</title>
     <style>
         body { font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif; max-width: 900px; margin: 30px auto; background-color: #f4f6f9; color: #333; }
         .container { background: white; padding: 40px; border-radius: 16px; box-shadow: 0 10px 30px rgba(0,0,0,0.05); }
@@ -24,7 +24,9 @@
             user-select: none;
         }
         .upload-area:hover, .upload-area.dragover { border-color: #0d6efd; background: #eef6ff; }
-        .upload-area input { display: none; }
+        
+        #fileInput { display: none; }
+
         .upload-icon { font-size: 40px; margin-bottom: 15px; display: block; }
         .upload-text { font-size: 18px; color: #0d6efd; font-weight: 600; display: block; margin-bottom: 5px;}
         .upload-hint { color: #adb5bd; font-size: 13px; }
@@ -38,10 +40,27 @@
         .stat-card.ok { border-color: #20c997; background-color: #e6fcf5; }
         .stat-card.ok .stat-val { color: #0ca678; }
 
-        /* Button */
-        button { background-color: #0d6efd; color: white; border: none; padding: 18px 30px; font-size: 16px; font-weight: 600; border-radius: 8px; cursor: pointer; width: 100%; transition: 0.2s; box-shadow: 0 4px 12px rgba(13, 110, 253, 0.2); }
-        button:hover { background-color: #0b5ed7; transform: translateY(-1px); }
-        button:disabled { background-color: #aeb5bc; cursor: not-allowed; opacity: 0.7; box-shadow: none; transform: none; }
+        /* Buttons */
+        .main-btn { background-color: #0d6efd; color: white; border: none; padding: 18px 30px; font-size: 16px; font-weight: 600; border-radius: 8px; cursor: pointer; width: 100%; transition: 0.2s; box-shadow: 0 4px 12px rgba(13, 110, 253, 0.2); }
+        .main-btn:hover { background-color: #0b5ed7; transform: translateY(-1px); }
+        .main-btn:disabled { background-color: #aeb5bc; cursor: not-allowed; opacity: 0.7; box-shadow: none; transform: none; }
+
+        /* Secondary Buttons Container */
+        .download-group { 
+            display: none; /* Скрыто по умолчанию */
+            grid-template-columns: 1fr 1fr; 
+            gap: 15px; 
+            margin-top: 15px; 
+        }
+        
+        .sec-btn {
+            border: none; padding: 15px; font-size: 14px; font-weight: 600; border-radius: 8px; cursor: pointer; transition: 0.2s; color: white;
+        }
+        .btn-app { background-color: #198754; } /* Зеленый */
+        .btn-app:hover { background-color: #157347; }
+        
+        .btn-stmt { background-color: #0dcaf0; color: #000; } /* Голубой */
+        .btn-stmt:hover { background-color: #31d2f2; }
         
         /* Console Log */
         #log { background: #1e293b; color: #00ff9d; font-family: "Consolas", "Monaco", monospace; padding: 20px; border-radius: 12px; height: 300px; overflow-y: auto; margin-top: 30px; font-size: 13px; white-space: pre-wrap; line-height: 1.6; border: 1px solid #334155; }
@@ -55,17 +74,18 @@
 <body>
 
     <div class="container">
-        <h1>🛠 Сборщик выписки <span style="font-size: 0.6em; color: #adb5bd; vertical-align: middle;">v1.27</span></h1>
+        <h1>🛠 Сборщик выписки <span style="font-size: 0.6em; color: #adb5bd; vertical-align: middle;">v1.29</span></h1>
         <div class="subtitle">
-            Автоматическая сортировка файлов, строгий фильтр КБК (исключение расходных кодов в доходах), 
-            интеллектуальное добавление аналитики (ADD_KLASS).
+            Синхронизация GUID (подмена в выписке), строгий фильтр КБК, 
+            формирование двух файлов (Приложение + Обновленная выписка).
         </div>
         
+        <input type="file" id="fileInput" multiple accept=".xml">
+
         <div class="upload-area" id="dropZone">
             <span class="upload-icon">📂</span>
             <span class="upload-text">Выберите папку или файлы</span>
             <span class="upload-hint">Перетащите сюда все файлы (выписку, платежки, распоряжения) сразу</span>
-            <input type="file" id="fileInput" multiple accept=".xml">
         </div>
 
         <div class="stats-grid">
@@ -83,7 +103,13 @@
             </div>
         </div>
 
-        <button id="btnRun" disabled>🚀 Сформировать Результат</button>
+        <button id="btnRun" class="main-btn" disabled>🚀 Сформировать и Скачать (Все)</button>
+        
+        <!-- Дополнительные кнопки (скрыты) -->
+        <div id="dlGroup" class="download-group">
+            <button id="btnDlApp" class="sec-btn btn-app">💾 Скачать Приложение</button>
+            <button id="btnDlStmt" class="sec-btn btn-stmt">📄 Скачать Выписку</button>
+        </div>
     </div>
 
     <div id="log">Ожидание загрузки файлов...</div>
@@ -95,7 +121,7 @@
 
     <script>
         // === Configuration ===
-        const APP_VERSION = "v1.27";
+        const APP_VERSION = "v1.29";
 
         // === State ===
         const Data = {
@@ -104,7 +130,15 @@
             map: {},           
             docsED: [],        
             docsRSKP: [],      
-            statementFound: false
+            statementFound: false,
+            statementDoc: null, 
+            statementName: "Statement.xml",
+            
+            // Хранилище результатов для раздельного скачивания
+            finalAppXml: null,
+            finalAppName: "",
+            finalStmtXml: null,
+            finalStmtName: ""
         };
 
         const logger = (msg, type = "info") => {
@@ -114,7 +148,6 @@
             if (type === "warn") { prefix = "⚠️ "; span.style.color = "#ffc107"; }
             if (type === "err") { prefix = "❌ "; span.style.color = "#ff6b6b"; }
             
-            // Исправлена ошибка CSS синтаксиса
             if (type === "success") { 
                 prefix = "✅ "; 
                 span.style.color = "#00ff9d"; 
@@ -212,13 +245,21 @@
             return candidates[0]; 
         }
 
+        function isIncomeKbk(kbk) {
+            if (!kbk || kbk.length !== 20) return false;
+            const incomeEndings = ["120", "130", "140", "150", "180"];
+            if (incomeEndings.some(end => kbk.endsWith(end))) return true;
+            if (kbk.startsWith("1") || kbk.startsWith("000")) return true;
+            return false;
+        }
+
         function findKbkComplex(text, dirSum) {
             if (!text) return null;
             const regex = /\(([^)]+)\)/g;
             let match;
             let candidates = [];
             while ((match = regex.exec(text)) !== null) {
-                const parts = match[1].split(';');
+                const parts = match[1].split(/[;,]/);
                 parts.forEach(part => {
                     const clean = part.replace(/[^a-zA-Zа-яА-ЯёЁ0-9]/g, '');
                     if (clean.length === 20) candidates.push(clean);
@@ -231,14 +272,8 @@
                 const expenseKbk = candidates.find(c => c.startsWith("9"));
                 return expenseKbk || null; 
             } else {
-                const incomeEndings = ["120", "130", "140", "150", "180"];
-                const priorityKbk = candidates.find(c => incomeEndings.some(end => c.endsWith(end)));
-                if (priorityKbk) return priorityKbk;
-                
-                const secondaryKbk = candidates.find(c => c.startsWith("1") || c.startsWith("000"));
-                if (secondaryKbk) return secondaryKbk;
-                
-                return null;
+                const priorityKbk = candidates.find(c => isIncomeKbk(c));
+                return priorityKbk || null;
             }
         }
 
@@ -251,9 +286,12 @@
 
             const innerContent = matchGroup[1]; 
             let addClass = "";
-            if (innerContent.trim().startsWith(";")) {
-                const parts = innerContent.split(";");
-                if (parts.length > 1 && parts[1].trim() !== "") addClass = parts[1].trim();
+            
+            const parts = innerContent.split(/[;,]/);
+            if (parts.length > 1 && parts[1].trim() !== "") {
+                addClass = parts[1].trim();
+            } else if (innerContent.trim().length > 1) {
+                addClass = innerContent.replace(/[;,]/, "").trim();
             }
 
             if (dirSum === "0") return addClass;
@@ -285,6 +323,8 @@
             Data.docsED = [];
             Data.docsRSKP = [];
             Data.statementFound = false;
+            Data.statementDoc = null;
+            document.getElementById('dlGroup').style.display = 'none'; // Скрываем доп кнопки
             
             const logEl = document.getElementById('log');
             logEl.innerHTML = ""; 
@@ -318,27 +358,18 @@
                 }
             }
             updateUI();
-            
-            // Clear input
             document.getElementById('fileInput').value = null; 
         };
 
-        // --- Drag & Drop & Click Handling ---
         const dropZone = document.getElementById('dropZone');
         const fileInput = document.getElementById('fileInput');
 
-        dropZone.addEventListener('click', (e) => {
-            fileInput.click();
-        });
-
-        fileInput.addEventListener('change', (e) => {
-            handleFiles(Array.from(e.target.files));
-        });
+        dropZone.addEventListener('click', () => { fileInput.click(); });
+        fileInput.addEventListener('change', (e) => { handleFiles(Array.from(e.target.files)); });
 
         ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
-            dropZone.addEventListener(eventName, preventDefaults, false);
+            dropZone.addEventListener(eventName, (e) => { e.preventDefault(); e.stopPropagation(); }, false);
         });
-        function preventDefaults(e) { e.preventDefault(); e.stopPropagation(); }
         
         ['dragenter', 'dragover'].forEach(eventName => {
             dropZone.addEventListener(eventName, () => dropZone.classList.add('dragover'), false);
@@ -360,6 +391,9 @@
             }
             
             try {
+                Data.statementDoc = xml;
+                Data.statementName = fileName;
+                
                 Data.mainDate = getVal(xml, "TtlPrt_DocDate");
                 let stmInfo = findNode(xml, "StmInfrmtn_TF") || findNode(xml, "StmInfrmtn");
                 Data.mainGuid = getVal(stmInfo, "GUID");
@@ -396,7 +430,7 @@
                     if (num && guid) {
                         const key = genKey(num, realSum);
                         if (!Data.map[key]) Data.map[key] = [];
-                        Data.map[key].push({ guid, operType, dirSum, counterPartyAcc });
+                        Data.map[key].push({ node: item, originalGuid: guid, operType, dirSum, counterPartyAcc });
                         count++;
                     }
                 });
@@ -428,29 +462,36 @@
             const hasFiles = (Data.docsED.length > 0 || Data.docsRSKP.length > 0);
             const btn = document.getElementById('btnRun');
             btn.disabled = !(Data.statementFound && hasFiles);
-            
-            if (!btn.disabled) {
-                btn.innerHTML = "🚀 Сформировать и Скачать";
-            } else {
-                btn.innerHTML = "Ожидание файлов...";
+        }
+
+        // === UPDATE GUID IN STATEMENT ===
+        function updateStatementGuid(statementNode, newGuid) {
+            try {
+                let guidNode = findNode(statementNode, "DocGUID");
+                if (guidNode) {
+                    guidNode.textContent = newGuid;
+                }
+            } catch(e) {
+                logger("Ошибка обновления GUID в выписке", "err");
             }
         }
 
         // === GENERATE RESULT ===
         document.getElementById('btnRun').addEventListener('click', () => {
-            logger("⚙️ Сборка документа...");
+            logger("⚙️ Сборка документа и синхронизация GUID...");
             
             let resultPD = "";
             let resultOrder = "";
             let totalSum = 0;
             let successCount = 0;
 
-            // --- 1. ПЛАТЕЖКИ (ED) ---
+            // 1. ED
             for (const item of Data.docsED) {
                 try {
                     const doc = item.xmlDoc;
                     let ed = findNode(doc, "ED101") || findNode(doc, "ED108");
-                    
+                    let fileGuid = ed.getAttribute("GUID");
+
                     const docNo = getAttr(ed, "AccDoc", "AccDocNo");
                     const rawSum = parseFloat(ed.getAttribute("Sum") || "0");
                     const sumRub = rawSum / 100;
@@ -468,6 +509,14 @@
                     const filePayeeAcc = r?.getAttribute("PersonalAcc");
 
                     const info = findBestMatch(candidates, filePayerAcc, filePayeeAcc);
+                    
+                    let finalGuid = fileGuid;
+                    if (!finalGuid) {
+                         finalGuid = info.originalGuid;
+                    } else {
+                        updateStatementGuid(info.node, finalGuid);
+                    }
+
                     const docDate = getAttr(ed, "AccDoc", "AccDocDate");
                     const purp = getVal(ed, "Purpose");
                     
@@ -517,7 +566,7 @@
             <Order_PAY>5</Order_PAY>
             <Purpose>${esc(purp)}</Purpose>
             <Date_IN_TOFK>${Data.mainDate}</Date_IN_TOFK>
-            <GUID>${info.guid}</GUID>
+            <GUID>${finalGuid}</GUID>
             <Inf_KBK>
                 <Inf_KBK_ITEM>
                     ${kbkBlock}
@@ -533,10 +582,12 @@
                 } catch (e) { logger(`Ошибка ED ${item.name}: ${e.message}`, "err"); }
             }
 
-            // --- 2. РАСПОРЯЖЕНИЯ (RSKP) ---
+            // 2. RSKP
             for (const item of Data.docsRSKP) {
                 try {
                     const root = item.xmlDoc.documentElement;
+                    let fileGuid = getVal(root, "GUID");
+
                     const docNo = getVal(root, "AccDoc_DocNum");
                     const sum = parseFloat(getVal(root, "BasicRequisites_PaySum") || "0");
                     const key = genKey(docNo, sum);
@@ -551,11 +602,31 @@
                     const filePayeeAcc = getVal(root, "Recip_AccNum");
                     const info = findBestMatch(candidates, filePayerAcc, filePayeeAcc);
 
+                    let finalGuid = fileGuid;
+                    if (!finalGuid) {
+                         finalGuid = info.originalGuid;
+                    } else {
+                        updateStatementGuid(info.node, finalGuid);
+                    }
+
                     const purp = getVal(root, "DepInfo_PayPurpose");
                     const xmlKbk = getVal(root, "FAHTeh > FAHTeh_ITEM > Payer_KBK");
                     
                     const foundKbk = findKbkComplex(purp, info.dirSum);
-                    const finalKbk = foundKbk || xmlKbk; 
+                    
+                    let finalKbk = foundKbk;
+                    if (!finalKbk && xmlKbk) {
+                        if (info.dirSum === "1") {
+                            finalKbk = xmlKbk;
+                        } else {
+                            if (isIncomeKbk(xmlKbk)) {
+                                finalKbk = xmlKbk;
+                            } else {
+                                finalKbk = null; 
+                            }
+                        }
+                    }
+
                     const typeVal = getTypeKBK(info.dirSum);
 
                     let rskpKbkBlock = "";
@@ -588,7 +659,7 @@
 
                     resultOrder += `
         <Inf_Order_ITEM>
-            <GUID_PrimDoc>${info.guid}</GUID_PrimDoc>
+            <GUID_PrimDoc>${finalGuid}</GUID_PrimDoc>
             <Order_Type>0</Order_Type>
             <Order_Num>${docNo}</Order_Num>
             <Order_DateComp>${docDate}</Order_DateComp>
@@ -641,7 +712,7 @@
                 } catch (e) { logger(`Ошибка RSKP ${item.name}: ${e.message}`, "err"); }
             }
 
-            // --- SAVE ---
+            // --- SAVE PREPARATION ---
             const blockPD = resultPD ? `<Inf_PD>${resultPD}\n    </Inf_PD>` : "";
             const blockOrder = resultOrder ? `<Inf_Order>${resultOrder}\n    </Inf_Order>` : "";
 
@@ -657,10 +728,32 @@
     ${blockOrder}
 </self:Inf_Pay_Doc>`;
 
-            // Имя файла: Приложение к выписке от YYYY-MM-DD.xml
-            const outName = `Приложение к выписке от ${Data.mainDate}.xml`;
-            download(finalXML, outName);
-            logger(`🏁 Успешно! Файл сохранен: ${outName}`, "success");
+            // Сохраняем в состояние для отдельных кнопок
+            Data.finalAppXml = finalXML;
+            Data.finalAppName = `Приложение к выписке от ${Data.mainDate}.xml`;
+
+            const serializer = new XMLSerializer();
+            Data.finalStmtXml = serializer.serializeToString(Data.statementDoc);
+            Data.finalStmtName = `Обновленная_${Data.statementName}`;
+
+            // Показываем кнопки
+            document.getElementById('dlGroup').style.display = 'grid';
+
+            // Автоматическое скачивание (как раньше)
+            download(Data.finalAppXml, Data.finalAppName);
+            setTimeout(() => {
+                download(Data.finalStmtXml, Data.finalStmtName);
+                logger(`🏁 Готово! Скачано 2 файла. Можно скачать повторно кнопками ниже.`, "success");
+            }, 800);
+        });
+
+        // --- HANDLERS FOR SEPARATE BUTTONS ---
+        document.getElementById('btnDlApp').addEventListener('click', () => {
+            if (Data.finalAppXml) download(Data.finalAppXml, Data.finalAppName);
+        });
+
+        document.getElementById('btnDlStmt').addEventListener('click', () => {
+            if (Data.finalStmtXml) download(Data.finalStmtXml, Data.finalStmtName);
         });
 
         function download(content, name) {
