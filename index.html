@@ -3,9 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Сборщик выписки (v1.31)</title>
+    <title>Сборщик выписки (v1.34)</title>
     <style>
-        body { font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif; max-width: 900px; margin: 30px auto; background-color: #f4f6f9; color: #333; }
+        body { font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif; max-width: 950px; margin: 30px auto; background-color: #f4f6f9; color: #333; }
         .container { background: white; padding: 40px; border-radius: 16px; box-shadow: 0 10px 30px rgba(0,0,0,0.05); }
         
         h1 { color: #2c3e50; margin: 0; font-size: 28px; }
@@ -14,12 +14,28 @@
         /* Settings Box */
         .settings-box {
             background: #f8f9fa; border: 1px solid #e9ecef;
-            padding: 15px 20px; border-radius: 8px; margin-bottom: 25px;
-            display: flex; gap: 25px; flex-wrap: wrap; align-items: center;
+            padding: 20px; border-radius: 8px; margin-bottom: 25px;
         }
+        
+        /* Analysis Settings (Top) */
+        .analysis-options { display: flex; gap: 25px; align-items: center; }
+
+        /* Conversion Settings (Hidden by default) */
+        #conversionPanel { display: none; margin-top: 20px; border-top: 1px solid #dee2e6; padding-top: 15px; }
+        
+        .settings-row { display: flex; gap: 20px; flex-wrap: wrap; margin-bottom: 15px; align-items: flex-end; }
+        .settings-row:last-child { margin-bottom: 0; }
+        
+        .inp-group { display: flex; flex-direction: column; gap: 5px; }
+        .inp-group label { font-size: 12px; font-weight: 600; color: #6c757d; text-transform: uppercase; }
+        .inp-group input[type="text"] { padding: 8px 12px; border: 1px solid #ced4da; border-radius: 4px; font-size: 14px; }
+        .inp-group input[type="text"]:focus { border-color: #0d6efd; outline: none; }
+        
         .toggle-label { display: flex; align-items: center; cursor: pointer; user-select: none; }
-        .toggle-label input { margin-right: 10px; transform: scale(1.3); cursor: pointer; }
+        .toggle-label input { margin-right: 8px; transform: scale(1.2); cursor: pointer; }
         .toggle-text { font-size: 14px; font-weight: 500; color: #495057; }
+
+        .hint-text { font-size: 13px; color: #0d6efd; font-style: italic; margin-bottom: 9px; margin-left: 5px;}
 
         .upload-area { 
             border: 2px dashed #cbd5e0; border-radius: 12px; padding: 40px 20px; text-align: center; 
@@ -37,6 +53,8 @@
         .stat-label { font-size: 11px; color: #6c757d; text-transform: uppercase; letter-spacing: 1px; font-weight: 600; }
         .stat-card.ok { border-color: #20c997; background-color: #e6fcf5; }
         .stat-card.ok .stat-val { color: #0ca678; }
+        .stat-card.warn { border-color: #ffc107; background-color: #fffbf0; }
+        .stat-card.warn .stat-val { color: #ffc107; }
 
         .main-btn { background-color: #0d6efd; color: white; border: none; padding: 18px 30px; font-size: 16px; font-weight: 600; border-radius: 8px; cursor: pointer; width: 100%; transition: 0.2s; box-shadow: 0 4px 12px rgba(13, 110, 253, 0.2); }
         .main-btn:hover { background-color: #0b5ed7; transform: translateY(-1px); }
@@ -57,9 +75,9 @@
 <body>
 
     <div class="container">
-        <h1>🛠 Сборщик выписки <span style="font-size: 0.6em; color: #adb5bd; vertical-align: middle;">v1.31</span></h1>
+        <h1>🛠 Сборщик выписки <span style="font-size: 0.6em; color: #adb5bd; vertical-align: middle;">v1.34</span></h1>
         <div class="subtitle">
-            Очистка "склеенных" кодов, синхронизация GUID, строгий фильтр.
+            Форматированный XML, умный интерфейс настроек, поддержка промежуточных выписок.
         </div>
         
         <input type="file" id="fileInput" multiple accept=".xml">
@@ -85,16 +103,48 @@
             </div>
         </div>
 
-        <!-- Настройки анализа -->
+        <!-- Настройки (Всегда видны галочки) -->
         <div class="settings-box">
-            <label class="toggle-label">
-                <input type="checkbox" id="optKbk"> 
-                <span class="toggle-text">Искать КБК в назначении</span>
-            </label>
-            <label class="toggle-label">
-                <input type="checkbox" id="optAddClass">
-                <span class="toggle-text">Искать Доп. класс. в назначении</span>
-            </label>
+            <div class="analysis-options">
+                <label class="toggle-label">
+                    <input type="checkbox" id="optKbk"> 
+                    <span class="toggle-text">Искать КБК в назначении</span>
+                </label>
+                <label class="toggle-label">
+                    <input type="checkbox" id="optAddClass">
+                    <span class="toggle-text">Искать Доп. класс. в назначении</span>
+                </label>
+            </div>
+            
+            <!-- Параметры конвертации (Скрыты по умолчанию) -->
+            <div id="conversionPanel">
+                <div style="width:100%; font-size:13px; font-weight:bold; color:#0d6efd; margin-bottom:15px;">
+                    Параметры конвертации (из Промежуточной в Итоговую):
+                </div>
+                
+                <!-- Ряд 1: УФК -->
+                <div class="settings-row">
+                    <div class="inp-group" style="flex: 0 0 100px;">
+                        <label>Код УФК</label>
+                        <input type="text" id="valTofkCode" value="3200">
+                    </div>
+                    <div class="inp-group" style="flex: 1;">
+                        <label>Наименование УФК</label>
+                        <input type="text" id="valTofkName" value="Управление Федерального казначейства по Нижегородской области">
+                    </div>
+                </div>
+
+                <!-- Ряд 2: Организация (Отдельно, чтобы подсказка влезла) -->
+                <div class="settings-row">
+                    <div class="inp-group" style="flex: 0 0 150px;">
+                        <label>Код Организации</label>
+                        <input type="text" id="valOrgCode" value="00000000">
+                    </div>
+                    <div class="inp-group" style="flex: 2; justify-content: flex-end;">
+                        <div class="hint-text" id="hintOrgName"></div>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <button id="btnRun" class="main-btn" disabled>🚀 Сформировать и Скачать (Все)</button>
@@ -113,11 +163,19 @@
     </div>
 
     <script>
-        const APP_VERSION = "v1.31";
+        const APP_VERSION = "v1.34";
 
         const Data = {
             mainGuid: "", mainDate: "", map: {}, docsED: [], docsRSKP: [], 
-            statementFound: false, statementDoc: null, statementName: "Statement.xml",
+            
+            statementFound: false, 
+            statementDoc: null, 
+            statementName: "Statement.xml",
+            
+            interFound: false, 
+            interDoc: null,    
+            interName: "",
+
             finalAppXml: null, finalAppName: "", finalStmtXml: null, finalStmtName: ""
         };
 
@@ -134,6 +192,7 @@
             log.scrollTop = log.scrollHeight;
         };
 
+        // --- DOM Helpers ---
         function findNode(parent, tagName) {
             if (!parent) return null;
             let list = parent.getElementsByTagName(tagName);
@@ -164,11 +223,19 @@
         }
 
         function getSafeKpp(val) { return (!val || val.trim() === "") ? "0" : val; }
-        function makeTag(tagName, value) { return (!value || value === "") ? "" : `<${tagName}>${value}</${tagName}>`; }
+        function makeTag(tagName, value, indent = "") { return (!value || value === "") ? "" : `${indent}<${tagName}>${value}</${tagName}>`; }
         function esc(s) { return (!s) ? "" : s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
         function genKey(num, amount) { return `${num}_${Math.abs(parseFloat(amount)).toFixed(2)}`; }
         function readFile(file) { return new Promise((r, j) => { const reader = new FileReader(); reader.onload = () => r(reader.result); reader.onerror = j; reader.readAsText(file); }); }
+        
+        function uuid() {
+            return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+                var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
+                return v.toString(16);
+            });
+        }
 
+        // --- Logic Helpers ---
         function findBestMatch(candidates, filePayerAcc, filePayeeAcc) {
             if (!candidates || candidates.length === 0) return null;
             const fPayer = (filePayerAcc || "").trim();
@@ -219,7 +286,6 @@
 
             const innerContent = matchGroup[1]; 
             let addClass = "";
-            
             const parts = innerContent.split(/[;,]/);
             if (parts.length > 1 && parts[1].trim() !== "") {
                 addClass = parts[1].trim();
@@ -242,7 +308,6 @@
                 const regexKosgu = /^\s*\(([^)]+)\)/;
                 const matchKosgu = textAfter.match(regexKosgu);
                 if (matchKosgu) kosgu = matchKosgu[1]; 
-
                 if (addClass && kosgu) return `${addClass}(${kosgu})`;
                 else if (!addClass && kosgu) return `(${kosgu})`;
                 else if (addClass && !kosgu) return addClass;
@@ -252,11 +317,144 @@
 
         function getTypeKBK(dirSum) { return (dirSum === "1") ? "10" : "20"; }
 
+        // --- CONVERTER V3 LOGIC ---
+        function convertInterToFinal(interDoc, docsED, docsRSKP) {
+            logger("🔄 Запуск конвертации промежуточной выписки...", "warn");
+            
+            const ownerAccount = interDoc.querySelector("ksNumber")?.textContent.trim() || "";
+            const db = {};
+
+            // 1. Build DB
+            for (const item of docsED) {
+                try {
+                    const doc = item.xmlDoc;
+                    let ed = findNode(doc, "ED101") || findNode(doc, "ED108");
+                    const accDocNo = getAttr(ed, "AccDoc", "AccDocNo");
+                    if (accDocNo) {
+                        let guid = ed.querySelector("GUID")?.textContent || uuid(); 
+                        const payerAcc = ed.querySelector("Payer")?.getAttribute("PersonalAcc");
+                        const payeeAcc = ed.querySelector("Payee")?.getAttribute("PersonalAcc");
+                        db[accDocNo] = { guid, payerAcc, payeeAcc };
+                    }
+                } catch(e){}
+            }
+            for (const item of docsRSKP) {
+                try {
+                    const root = item.xmlDoc.documentElement;
+                    const docNum = getVal(root, "AccDoc_DocNum");
+                    if (docNum) {
+                        const guid = getVal(root, "AccDoc_Guid") || uuid();
+                        const payerAcc = getVal(root, "Payer_CheckAcc");
+                        const recipAcc = getVal(root, "Recip_CheckAcc");
+                        db[docNum] = { guid, payerAcc, payeeAcc: recipAcc };
+                    }
+                } catch(e){}
+            }
+
+            // 2. Read Settings
+            const tofkCd = document.getElementById('valTofkCode').value;
+            const tofkNm = document.getElementById('valTofkName').value;
+            const orgCd = document.getElementById('valOrgCode').value;
+
+            // 3. Generate XML
+            const rawDocNum = interDoc.querySelector("ttlPrtDocNum")?.textContent || "";
+            const docNum = rawDocNum.replace("П-", "И-");
+            
+            const rawDate = interDoc.querySelector("ttlPrtDocDateForRep")?.textContent || "";
+            const shortDate = rawDate.split('T')[0];
+            
+            const balStart = interDoc.querySelector("startBalance")?.textContent || "0.00";
+            const balEnd = interDoc.querySelector("endBalance")?.textContent || "0.00";
+            const orgName = interDoc.querySelector("ttlPrtNameOrg")?.textContent || "";
+            const globalGuid = interDoc.querySelector("globalID")?.textContent || uuid();
+
+            const items = interDoc.querySelectorAll("operDataItem");
+            let allItemsXml = ""; 
+            let sumDeb = 0, sumCred = 0;
+
+            items.forEach((item, idx) => {
+                const iNum = item.querySelector("docNum")?.textContent;
+                const iDate = item.querySelector("docDate")?.textContent;
+                const iAmount = parseFloat(item.querySelector("operAmount")?.textContent || "0");
+                const iCorrBic = item.querySelector("corrBIC")?.textContent || "";
+                const iPurp = item.querySelector("purpPay")?.textContent || "";
+                
+                const info = db[iNum];
+                let guid = uuid();
+                let isDebit = false; 
+                let finalSendAcc = item.querySelector("sendAcc")?.textContent || "";
+
+                if (info) {
+                    guid = info.guid;
+                    if (info.payerAcc) finalSendAcc = info.payerAcc;
+                    
+                    if (ownerAccount === info.payerAcc) isDebit = true;
+                    else if (ownerAccount === info.payeeAcc) isDebit = false;
+                    else { if (finalSendAcc === ownerAccount) isDebit = true; }
+                } else {
+                    if (finalSendAcc === ownerAccount) isDebit = true;
+                }
+
+                if (isDebit) sumDeb += iAmount; else sumCred += iAmount;
+                const amtIn = isDebit ? "0.00" : iAmount.toFixed(2);
+                const amtOut = isDebit ? iAmount.toFixed(2) : "0.00";
+
+                allItemsXml += `
+    <Oper_BudData_ITEM>
+        <Line_Num>${idx + 1}</Line_Num>
+        <DocNum>${iNum}</DocNum>
+        <DocDate>${iDate}</DocDate>
+        <DocGUID>${guid}</DocGUID>
+        <OperType>01</OperType>
+        <Bic_Corr>${iCorrBic}</Bic_Corr>
+        <AmountIn>${amtIn}</AmountIn>
+        <AmountOut>${amtOut}</AmountOut>
+        <SendAcc>${finalSendAcc}</SendAcc>
+        <PurpPay>${esc(iPurp)}</PurpPay>
+    </Oper_BudData_ITEM>`;
+            });
+
+            const finalXmlStr = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<self:SKP_REPORT_KS xmlns:self="http://www.roskazna.ru/eb/domain/SKP_REPORT_KS/formular" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" versionID="1.0" metaType="formular" xsi:schemaLocation="http://www.roskazna.ru/eb/domain/skp_report_ks/formular formulars.xsd">
+    <TtlPrt_DocNum>${docNum}</TtlPrt_DocNum>
+    <TtlPrt_DocDate>${shortDate}</TtlPrt_DocDate>
+    <TtlPrt_TR_AccNum>${ownerAccount}</TtlPrt_TR_AccNum>
+    <TtlPrt_Org_Code>${orgCd}</TtlPrt_Org_Code>
+    <TtlPrt_Name_Org_Code>${esc(orgName)}</TtlPrt_Name_Org_Code>
+    <TtlPrt_report_type_flag>Итоговая</TtlPrt_report_type_flag>
+    <TtlPrt_BalanceBegin>${balStart}</TtlPrt_BalanceBegin>
+    <TtlPrt_BalanceEnd>${balEnd}</TtlPrt_BalanceEnd>
+    <TtlPrt_FinAmountIn>${sumCred.toFixed(2)}</TtlPrt_FinAmountIn>
+    <TtlPrt_FinAmountOut>${sumDeb.toFixed(2)}</TtlPrt_FinAmountOut>
+    <TtlPrt_Code_OKEU>383</TtlPrt_Code_OKEU>
+    <OperBudData_Deb>${allItemsXml}
+    </OperBudData_Deb>
+    <OperBudData_Cred>${allItemsXml}
+    </OperBudData_Cred>
+    <StmInfrmtn_TF>
+        <GUID>${globalGuid}</GUID>
+    </StmInfrmtn_TF>
+    <TtlPrt_TOFK_Serv>
+        <Nm>${tofkNm}</Nm>
+        <Cd>${tofkCd}</Cd>
+    </TtlPrt_TOFK_Serv>
+    <TtlPrt_NameOpenTOFK>${tofkNm}</TtlPrt_NameOpenTOFK>
+    <TtlPrt_CodeOpenTOFK>${tofkCd}</TtlPrt_CodeOpenTOFK>
+</self:SKP_REPORT_KS>`;
+
+            return finalXmlStr;
+        }
+
+
         const handleFiles = async (files) => {
             if (files.length === 0) return;
             Data.mainGuid = ""; Data.mainDate = ""; Data.map = {}; Data.docsED = []; Data.docsRSKP = [];
-            Data.statementFound = false; Data.statementDoc = null;
+            Data.statementFound = false; Data.statementDoc = null; 
+            Data.interFound = false; Data.interDoc = null;
             document.getElementById('dlGroup').style.display = 'none';
+            document.getElementById('hintOrgName').textContent = ""; 
+            document.getElementById('conversionPanel').style.display = 'none'; // Hide by default
+            
             const logEl = document.getElementById('log'); logEl.innerHTML = ""; 
 
             logger(`--- Анализ ${files.length} файлов ---`);
@@ -271,6 +469,16 @@
 
                     if (doc.querySelector("StmInfrmtn") || doc.querySelector("StmInfrmtn_TF") || rootName.includes("Statement")) {
                         processStatement(doc, file.name);
+                    } else if (rootName === "skpReportKs") {
+                        Data.interFound = true;
+                        Data.interDoc = doc;
+                        Data.interName = file.name;
+                        
+                        const orgName = getVal(doc, "ttlPrtNameOrg");
+                        if(orgName) {
+                            document.getElementById('hintOrgName').textContent = "Из файла: " + orgName;
+                        }
+
                     } else if (rootName === "ED101" || rootName === "ED108") {
                         Data.docsED.push({ name: file.name, xmlDoc: doc });
                     } else if (rootName.includes("MSC_TransfOrderAcc")) {
@@ -278,6 +486,24 @@
                     }
                 } catch (err) { logger(`Сбой чтения ${file.name}: ${err.message}`, "err"); }
             }
+            
+            // --- DECISION LOGIC ---
+            if (!Data.statementFound && Data.interFound) {
+                logger(`Найдена промежуточная выписка: ${Data.interName}.`, "warn");
+                // SHOW SETTINGS PANEL
+                document.getElementById('conversionPanel').style.display = 'block';
+                
+                try {
+                    // Try conversion immediately to see if it works, but real conversion happens on RUN
+                    // Actually, we can wait for RUN button.
+                    logger(`Готов к конвертации. Проверьте настройки ниже.`, "success");
+                } catch(e) {
+                    logger("Ошибка подготовки: " + e.message, "err");
+                }
+            } else if (Data.statementFound && Data.interFound) {
+                logger(`Игнорирую промежуточную выписку, т.к. найдена итоговая.`, "success");
+            }
+
             updateUI();
             document.getElementById('fileInput').value = null; 
         };
@@ -292,7 +518,7 @@
         dropZone.addEventListener('drop', (e) => { const dt = e.dataTransfer; handleFiles(Array.from(dt.files)); }, false);
 
         function processStatement(xml, fileName) {
-            if (Data.statementFound) logger(`Найдена еще одна выписка (${fileName}). Беру последнюю.`, "warn");
+            if (Data.statementFound && fileName.indexOf("Converted") === -1) logger(`Найдена еще одна выписка (${fileName}). Беру последнюю.`, "warn");
             try {
                 Data.statementDoc = xml; Data.statementName = fileName;
                 Data.mainDate = getVal(xml, "TtlPrt_DocDate");
@@ -331,10 +557,21 @@
             document.getElementById('countRSKP').textContent = Data.docsRSKP.length;
             const stDiv = document.getElementById('countStatement');
             const cardSt = document.getElementById('cardStatement');
-            if (Data.statementFound) { stDiv.textContent = "OK"; cardSt.classList.add("ok"); } 
-            else { stDiv.textContent = "Нет"; cardSt.classList.remove("ok"); }
+            
+            cardSt.className = "stat-card"; 
+            if (Data.statementFound) { 
+                if (Data.statementName.includes("Converted")) {
+                     stDiv.textContent = "Из Промеж."; cardSt.classList.add("warn");
+                } else {
+                     stDiv.textContent = "Итоговая"; cardSt.classList.add("ok");
+                }
+            } 
+            else if (Data.interFound) { stDiv.textContent = "Промеж."; cardSt.classList.add("warn"); }
+            else { stDiv.textContent = "Нет"; }
+
             const hasFiles = (Data.docsED.length > 0 || Data.docsRSKP.length > 0);
-            document.getElementById('btnRun').disabled = !(Data.statementFound && hasFiles);
+            const canRun = (Data.statementFound || Data.interFound) && hasFiles;
+            document.getElementById('btnRun').disabled = !canRun;
         }
 
         function updateStatementGuid(statementNode, newGuid) {
@@ -343,14 +580,25 @@
 
         document.getElementById('btnRun').addEventListener('click', () => {
             logger("⚙️ Сборка документа...");
-            
-            // Считываем состояние чекбоксов
+            const parser = new DOMParser();
+
+            // IF NO FINAL STATEMENT BUT INTERMEDIATE EXISTS -> CONVERT NOW
+            if (!Data.statementFound && Data.interFound) {
+                try {
+                    const convertedXmlStr = convertInterToFinal(Data.interDoc, Data.docsED, Data.docsRSKP);
+                    const convertedDoc = parser.parseFromString(convertedXmlStr, "text/xml");
+                    processStatement(convertedDoc, "Converted_" + Data.interName);
+                } catch(e) {
+                    logger("Критическая ошибка конвертации: " + e.message, "err");
+                    return;
+                }
+            }
+
             const optKbk = document.getElementById('optKbk').checked;
             const optAdd = document.getElementById('optAddClass').checked;
-
             let resultPD = ""; let resultOrder = ""; let totalSum = 0; let successCount = 0;
 
-            // --- 1. ED ---
+            // 1. ED
             for (const item of Data.docsED) {
                 try {
                     const doc = item.xmlDoc;
@@ -373,41 +621,67 @@
                     const docDate = getAttr(ed, "AccDoc", "AccDocDate");
                     const purp = getVal(ed, "Purpose");
                     
-                    // Logic based on Checkboxes
-                    let foundKbk = null;
-                    if (optKbk) {
-                        foundKbk = findKbkComplex(purp, info.dirSum);
-                    }
-
+                    let foundKbk = null; if (optKbk) foundKbk = findKbkComplex(purp, info.dirSum);
                     let kbkBlock = ""; let addClassTag = "";
                     if (foundKbk) {
                         const typeVal = getTypeKBK(info.dirSum);
-                        kbkBlock = `<KBK>${foundKbk}</KBK><TYPE_KBK value="${typeVal}"></TYPE_KBK>`;
-                        
-                        // AddClass only if KBK found AND option enabled
+                        kbkBlock = makeTag("KBK", foundKbk);
+                        const tagTv = `<TYPE_KBK value="${typeVal}"></TYPE_KBK>`;
+                        kbkBlock = `${kbkBlock}${tagTv}`;
+
                         if (optAdd) {
                             const addKlassVal = getAddClassAndKosgu(purp, foundKbk, info.dirSum);
                             addClassTag = makeTag("ADD_KLASS", addKlassVal);
                         }
                     }
-                    
                     const pBank = findNode(p, "Bank"); const rBank = findNode(r, "Bank");
-                    resultPD += `<Inf_PD_ITEM>
-            <Nom_PP>${docNo}</Nom_PP><Date_PP>${docDate}</Date_PP><Sum_PP>${sumRub.toFixed(2)}</Sum_PP>
-            <Vid_Pay value="0"></Vid_Pay><Date_PP_IN>${docDate}</Date_PP_IN><Date_PP_OUT>${docDate}</Date_PP_OUT>
+                    resultPD += `
+        <Inf_PD_ITEM>
+            <Nom_PP>${docNo}</Nom_PP>
+            <Date_PP>${docDate}</Date_PP>
+            <Sum_PP>${sumRub.toFixed(2)}</Sum_PP>
+            <Vid_Pay value="0"></Vid_Pay>
+            <Date_PP_IN>${docDate}</Date_PP_IN>
+            <Date_PP_OUT>${docDate}</Date_PP_OUT>
             <VID_Oper>${info.operType}</VID_Oper>
-            <Inf_PAY><INN_PAY>${p?.getAttribute("INN")||""}</INN_PAY><KPP_PAY>${getSafeKpp(p?.getAttribute("KPP"))}</KPP_PAY><CName_PAY>${esc(getVal(p, "Name"))}</CName_PAY></Inf_PAY>
-            <Bank_PAY><BS_PAY>${filePayerAcc||""}</BS_PAY><BIC_PAY>${pBank?.getAttribute("BIC")||""}</BIC_PAY><BS_KS_PAY>${pBank?.getAttribute("CorrespAcc")||""}</BS_KS_PAY></Bank_PAY>
-            <Inf_RCP><INN_PAY>${r?.getAttribute("INN")||""}</INN_PAY><KPP_PAY>${getSafeKpp(r?.getAttribute("KPP"))}</KPP_PAY><CName_PAY>${esc(getVal(r, "Name"))}</CName_PAY></Inf_RCP>
-            <Bank_RCP><BS_PAY>${filePayeeAcc||""}</BS_PAY><BIC_PAY>${rBank?.getAttribute("BIC")||""}</BIC_PAY><BS_KS_PAY>${rBank?.getAttribute("CorrespAcc")||""}</BS_KS_PAY></Bank_RCP>
-            <Order_PAY>5</Order_PAY><Purpose>${esc(purp)}</Purpose><Date_IN_TOFK>${Data.mainDate}</Date_IN_TOFK><GUID>${finalGuid}</GUID>
-            <Inf_KBK><Inf_KBK_ITEM>${kbkBlock}${addClassTag}<SUM>${sumRub.toFixed(2)}</SUM><Dir_Sum value="${info.dirSum}"></Dir_Sum></Inf_KBK_ITEM></Inf_KBK>
+            <Inf_PAY>
+                <INN_PAY>${p?.getAttribute("INN")||""}</INN_PAY>
+                <KPP_PAY>${getSafeKpp(p?.getAttribute("KPP"))}</KPP_PAY>
+                <CName_PAY>${esc(getVal(p, "Name"))}</CName_PAY>
+            </Inf_PAY>
+            <Bank_PAY>
+                <BS_PAY>${filePayerAcc||""}</BS_PAY>
+                <BIC_PAY>${pBank?.getAttribute("BIC")||""}</BIC_PAY>
+                <BS_KS_PAY>${pBank?.getAttribute("CorrespAcc")||""}</BS_KS_PAY>
+            </Bank_PAY>
+            <Inf_RCP>
+                <INN_PAY>${r?.getAttribute("INN")||""}</INN_PAY>
+                <KPP_PAY>${getSafeKpp(r?.getAttribute("KPP"))}</KPP_PAY>
+                <CName_PAY>${esc(getVal(r, "Name"))}</CName_PAY>
+            </Inf_RCP>
+            <Bank_RCP>
+                <BS_PAY>${filePayeeAcc||""}</BS_PAY>
+                <BIC_PAY>${rBank?.getAttribute("BIC")||""}</BIC_PAY>
+                <BS_KS_PAY>${rBank?.getAttribute("CorrespAcc")||""}</BS_KS_PAY>
+            </Bank_RCP>
+            <Order_PAY>5</Order_PAY>
+            <Purpose>${esc(purp)}</Purpose>
+            <Date_IN_TOFK>${Data.mainDate}</Date_IN_TOFK>
+            <GUID>${finalGuid}</GUID>
+            <Inf_KBK>
+                <Inf_KBK_ITEM>
+                    ${kbkBlock}
+                    ${addClassTag}
+                    <SUM>${sumRub.toFixed(2)}</SUM>
+                    <Dir_Sum value="${info.dirSum}"></Dir_Sum>
+                </Inf_KBK_ITEM>
+            </Inf_KBK>
         </Inf_PD_ITEM>`;
                     totalSum += sumRub; successCount++;
                 } catch (e) { logger(`Ошибка ED ${item.name}: ${e.message}`, "err"); }
             }
 
-            // --- 2. RSKP ---
+            // 2. RSKP
             for (const item of Data.docsRSKP) {
                 try {
                     const root = item.xmlDoc.documentElement;
@@ -427,28 +701,17 @@
                     const purp = getVal(root, "DepInfo_PayPurpose");
                     const xmlKbk = getVal(root, "FAHTeh > FAHTeh_ITEM > Payer_KBK");
                     
-                    // Logic based on Checkboxes
-                    let foundKbk = null;
-                    if (optKbk) {
-                        foundKbk = findKbkComplex(purp, info.dirSum);
-                    }
-                    
+                    let foundKbk = null; if (optKbk) foundKbk = findKbkComplex(purp, info.dirSum);
                     let finalKbk = foundKbk;
                     if (!finalKbk && xmlKbk) {
                         if (info.dirSum === "1") finalKbk = xmlKbk;
                         else { if (isIncomeKbk(xmlKbk)) finalKbk = xmlKbk; else finalKbk = null; }
                     }
-
                     const typeVal = getTypeKBK(info.dirSum);
                     let rskpKbkBlock = "";
-                    
                     if (finalKbk) {
-                         // AddClass only if KBK found AND option enabled
                          let addKlassVal = "";
-                         if (optAdd) {
-                             addKlassVal = getAddClassAndKosgu(purp, finalKbk, info.dirSum);
-                         }
-
+                         if (optAdd) addKlassVal = getAddClassAndKosgu(purp, finalKbk, info.dirSum);
                          const tagKBK = makeTag("Order_KBK", finalKbk);
                          const tagType = `<Order_Type_KBK value="${typeVal}"></Order_Type_KBK>`;
                          const tagAdd = makeTag("Order_Add_Klass", addKlassVal);
@@ -465,15 +728,54 @@
                         if (!taxDocNo) taxDocNo = "0"; if (!taxDocDate) taxDocDate = "0";
                     }
 
-                    resultOrder += `<Inf_Order_ITEM>
-            <GUID_PrimDoc>${finalGuid}</GUID_PrimDoc><Order_Type>0</Order_Type><Order_Num>${docNo}</Order_Num>
-            <Order_DateComp>${docDate}</Order_DateComp><Order_DateExec>${execDate}</Order_DateExec>
-            <Amount_Curr>${sum.toFixed(2)}</Amount_Curr><CurrCode_OKV>643</CurrCode_OKV><Amount_Rub>${sum.toFixed(2)}</Amount_Rub>
-            <Purpose_Pay>${esc(purp)}</Purpose_Pay><UIN_Char>0</UIN_Char>${makeTag("OPERATION_ID", getVal(root, "OperationID"))}
-            <Actual_Payer><ActPayer_INN>${getVal(root, "Payer_INN")}</ActPayer_INN><ActPayer_KPP>${getSafeKpp(getVal(root, "Payer_KPP"))}</ActPayer_KPP><Payer_Name>${esc(getVal(root, "Payer_Name"))}</Payer_Name>${makeTag("Payer_PersAccNum", filePayerAcc)}<Payer_AccNum>${getVal(root, "Payer_CheckAcc")}</Payer_AccNum><PayServOrg_Name>${esc(getVal(root, "Payer_BankName"))}</PayServOrg_Name><PayServOrg_BIK>${getVal(root, "Payer_BIK")}</PayServOrg_BIK><PayServOrg_AccNum>${getVal(root, "Payer_CorrAcc")}</PayServOrg_AccNum></Actual_Payer>
-            <Actual_Recip><Recip_Name>${esc(getVal(root, "Recip_Name"))}</Recip_Name>${makeTag("Recip_PersAccNum", filePayeeAcc)}<Recip_INN>${getVal(root, "Recip_INN")}</Recip_INN><Recip_KPP>${getSafeKpp(getVal(root, "Recip_KPP"))}</Recip_KPP><RecServOrg_AccNum>${getVal(root, "Recip_CorrAcc")}</RecServOrg_AccNum><RecServOrg_Name>${esc(getVal(root, "Recip_BankName"))}</RecServOrg_Name><RecServOrg_BIK>${getVal(root, "Recip_BIK")}</RecServOrg_BIK><Recip_AccNum>${getVal(root, "Recip_CheckAcc")}</Recip_AccNum></Actual_Recip>
-            <Code_Reven>${codeReven}</Code_Reven>${makeTag("Code_OKTMO", oktmo)}<Payer_status>${status}</Payer_status><Basis_Pay>${basis}</Basis_Pay><Tax_Period>${period}</Tax_Period><DocBase_Num>${taxDocNo}</DocBase_Num><DocBase_Date>${taxDocDate}</DocBase_Date>
-            <Inf_Order_KBK><Inf_Order_KBK_ITEM>${rskpKbkBlock}<Order_Sum>${sum.toFixed(2)}</Order_Sum><Order_Dir_Sum value="${info.dirSum}"></Order_Dir_Sum><Order_Type_Ap>0</Order_Type_Ap></Inf_Order_KBK_ITEM></Inf_Order_KBK>
+                    resultOrder += `
+        <Inf_Order_ITEM>
+            <GUID_PrimDoc>${finalGuid}</GUID_PrimDoc>
+            <Order_Type>0</Order_Type>
+            <Order_Num>${docNo}</Order_Num>
+            <Order_DateComp>${docDate}</Order_DateComp>
+            <Order_DateExec>${execDate}</Order_DateExec>
+            <Amount_Curr>${sum.toFixed(2)}</Amount_Curr>
+            <CurrCode_OKV>643</CurrCode_OKV>
+            <Amount_Rub>${sum.toFixed(2)}</Amount_Rub>
+            <Purpose_Pay>${esc(purp)}</Purpose_Pay>
+            <UIN_Char>0</UIN_Char>
+            ${makeTag("OPERATION_ID", getVal(root, "OperationID"))}
+            <Actual_Payer>
+                <ActPayer_INN>${getVal(root, "Payer_INN")}</ActPayer_INN>
+                <ActPayer_KPP>${getSafeKpp(getVal(root, "Payer_KPP"))}</ActPayer_KPP>
+                <Payer_Name>${esc(getVal(root, "Payer_Name"))}</Payer_Name>
+                ${makeTag("Payer_PersAccNum", filePayerAcc)}
+                <Payer_AccNum>${getVal(root, "Payer_CheckAcc")}</Payer_AccNum>
+                <PayServOrg_Name>${esc(getVal(root, "Payer_BankName"))}</PayServOrg_Name>
+                <PayServOrg_BIK>${getVal(root, "Payer_BIK")}</PayServOrg_BIK>
+                <PayServOrg_AccNum>${getVal(root, "Payer_CorrAcc")}</PayServOrg_AccNum>
+            </Actual_Payer>
+            <Actual_Recip>
+                <Recip_Name>${esc(getVal(root, "Recip_Name"))}</Recip_Name>
+                ${makeTag("Recip_PersAccNum", filePayeeAcc)}
+                <Recip_INN>${getVal(root, "Recip_INN")}</Recip_INN>
+                <Recip_KPP>${getSafeKpp(getVal(root, "Recip_KPP"))}</Recip_KPP>
+                <RecServOrg_AccNum>${getVal(root, "Recip_CorrAcc")}</RecServOrg_AccNum>
+                <RecServOrg_Name>${esc(getVal(root, "Recip_BankName"))}</RecServOrg_Name>
+                <RecServOrg_BIK>${getVal(root, "Recip_BIK")}</RecServOrg_BIK>
+                <Recip_AccNum>${getVal(root, "Recip_CheckAcc")}</Recip_AccNum>
+            </Actual_Recip>
+            <Code_Reven>${codeReven}</Code_Reven>
+            ${makeTag("Code_OKTMO", oktmo)}
+            <Payer_status>${status}</Payer_status>
+            <Basis_Pay>${basis}</Basis_Pay>
+            <Tax_Period>${period}</Tax_Period>
+            <DocBase_Num>${taxDocNo}</DocBase_Num>
+            <DocBase_Date>${taxDocDate}</DocBase_Date>
+            <Inf_Order_KBK>
+                <Inf_Order_KBK_ITEM>
+                    ${rskpKbkBlock}
+                    <Order_Sum>${sum.toFixed(2)}</Order_Sum>
+                    <Order_Dir_Sum value="${info.dirSum}"></Order_Dir_Sum>
+                    <Order_Type_Ap>0</Order_Type_Ap>
+                </Inf_Order_KBK_ITEM>
+            </Inf_Order_KBK>
         </Inf_Order_ITEM>`;
                     totalSum += sum; successCount++;
                 } catch (e) { logger(`Ошибка RSKP ${item.name}: ${e.message}`, "err"); }
@@ -483,7 +785,12 @@
             const blockOrder = resultOrder ? `<Inf_Order>${resultOrder}\n    </Inf_Order>` : "";
             const finalXML = `<?xml version ="1.0" encoding="UTF-8"?>
 <self:Inf_Pay_Doc metaType="formular" versionID="4.0" xsi:schemaLocation="http://www.roskazna.ru/eb/domain/Inf_Pay_Doc/formular formulars.xsd" xmlns:self="http://www.roskazna.ru/eb/domain/Inf_Pay_Doc/formular" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
-    <GUID_Doc>${Data.mainGuid}</GUID_Doc><Date>${Data.mainDate}</Date><Code_Doc value="VQ"></Code_Doc><Vid_Otch value="0"></Vid_Otch><Kol_Doc>${successCount}</Kol_Doc><Sum_Doc>${totalSum.toFixed(2)}</Sum_Doc>
+    <GUID_Doc>${Data.mainGuid}</GUID_Doc>
+    <Date>${Data.mainDate}</Date>
+    <Code_Doc value="VQ"></Code_Doc>
+    <Vid_Otch value="0"></Vid_Otch>
+    <Kol_Doc>${successCount}</Kol_Doc>
+    <Sum_Doc>${totalSum.toFixed(2)}</Sum_Doc>
     ${blockPD}${blockOrder}
 </self:Inf_Pay_Doc>`;
 
@@ -506,7 +813,6 @@
         const GITHUB_USERNAME = "rintaru123";
         const REPO_NAME = "EBP-account-statement-packager"; 
         const VERSION_JSON_URL = `https://${GITHUB_USERNAME}.github.io/${REPO_NAME}/version.json`;
-
         async function checkForUpdates() {
             try {
                 const response = await fetch(VERSION_JSON_URL + '?t=' + new Date().getTime());
@@ -515,7 +821,6 @@
                 if (data.version !== APP_VERSION) { showUpdateNotification(data.version, data.message, data.download_url); }
             } catch (e) {}
         }
-
         function showUpdateNotification(ver, msg, url) {
             const div = document.createElement('div');
             div.style.cssText = `position: fixed; bottom: 20px; right: 20px; background: #fff; border-left: 5px solid #0d6efd; padding: 15px 20px; border-radius: 8px; box-shadow: 0 5px 20px rgba(0,0,0,0.2); font-family: "Segoe UI", sans-serif; z-index: 1000; animation: slideIn 0.5s ease-out;`;
