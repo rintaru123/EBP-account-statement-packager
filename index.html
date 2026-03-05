@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Сборщик выписки (v1.34)</title>
+    <title>Сборщик выписки (v1.37)</title>
     <style>
         body { font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif; max-width: 950px; margin: 30px auto; background-color: #f4f6f9; color: #333; }
         .container { background: white; padding: 40px; border-radius: 16px; box-shadow: 0 10px 30px rgba(0,0,0,0.05); }
@@ -11,16 +11,12 @@
         h1 { color: #2c3e50; margin: 0; font-size: 28px; }
         .subtitle { color: #6c757d; font-size: 14px; margin-top: 8px; margin-bottom: 30px; line-height: 1.5; }
         
-        /* Settings Box */
         .settings-box {
             background: #f8f9fa; border: 1px solid #e9ecef;
             padding: 20px; border-radius: 8px; margin-bottom: 25px;
         }
         
-        /* Analysis Settings (Top) */
         .analysis-options { display: flex; gap: 25px; align-items: center; }
-
-        /* Conversion Settings (Hidden by default) */
         #conversionPanel { display: none; margin-top: 20px; border-top: 1px solid #dee2e6; padding-top: 15px; }
         
         .settings-row { display: flex; gap: 20px; flex-wrap: wrap; margin-bottom: 15px; align-items: flex-end; }
@@ -75,9 +71,9 @@
 <body>
 
     <div class="container">
-        <h1>🛠 Сборщик выписки <span style="font-size: 0.6em; color: #adb5bd; vertical-align: middle;">v1.34</span></h1>
+        <h1>🛠 Сборщик выписки <span style="font-size: 0.6em; color: #adb5bd; vertical-align: middle;">v1.37</span></h1>
         <div class="subtitle">
-            Форматированный XML, умный интерфейс настроек, поддержка промежуточных выписок.
+            Улучшен парсинг Доп.Классификации (игнорирование сложных блоков), очистка л/с.
         </div>
         
         <input type="file" id="fileInput" multiple accept=".xml">
@@ -103,7 +99,6 @@
             </div>
         </div>
 
-        <!-- Настройки (Всегда видны галочки) -->
         <div class="settings-box">
             <div class="analysis-options">
                 <label class="toggle-label">
@@ -116,13 +111,10 @@
                 </label>
             </div>
             
-            <!-- Параметры конвертации (Скрыты по умолчанию) -->
             <div id="conversionPanel">
                 <div style="width:100%; font-size:13px; font-weight:bold; color:#0d6efd; margin-bottom:15px;">
                     Параметры конвертации (из Промежуточной в Итоговую):
                 </div>
-                
-                <!-- Ряд 1: УФК -->
                 <div class="settings-row">
                     <div class="inp-group" style="flex: 0 0 100px;">
                         <label>Код УФК</label>
@@ -133,8 +125,6 @@
                         <input type="text" id="valTofkName" value="Управление Федерального казначейства по Нижегородской области">
                     </div>
                 </div>
-
-                <!-- Ряд 2: Организация (Отдельно, чтобы подсказка влезла) -->
                 <div class="settings-row">
                     <div class="inp-group" style="flex: 0 0 150px;">
                         <label>Код Организации</label>
@@ -157,25 +147,28 @@
 
     <div id="log">Ожидание загрузки файлов...</div>
 
+    <!-- Обновленный блок авторов -->
     <div class="authors">
-        Идея и улучшения: <a href="https://github.com/rintaru123" target="_blank">Rintaru123</a><br>
-        Разработка и дизайн: Gemini 3-pro
+        <div style="margin-bottom: 5px; font-weight: 600; color: #495057;">
+            Разработано в рамках проекта "Эффективный регион" <br>
+            <span style="font-weight: normal; font-size: 0.9em;">Финансовый отдел администрации Аликовского муниципального округа Чувашской Республики</span>
+        </div>
+        <div>
+            Автор и поддержка: <a href="https://github.com/rintaru123" target="_blank">Rintaru123</a>
+            | Лицензия: MIT
+        </div>
+        <div style="font-size: 0.85em; color: #adb5bd; margin-top: 5px;">
+            v1.37 | Design by Gemini 3-pro
+        </div>
     </div>
 
     <script>
-        const APP_VERSION = "v1.34";
+        const APP_VERSION = "v1.37";
 
         const Data = {
             mainGuid: "", mainDate: "", map: {}, docsED: [], docsRSKP: [], 
-            
-            statementFound: false, 
-            statementDoc: null, 
-            statementName: "Statement.xml",
-            
-            interFound: false, 
-            interDoc: null,    
-            interName: "",
-
+            statementFound: false, statementDoc: null, statementName: "Statement.xml",
+            interFound: false, interDoc: null, interName: "",
             finalAppXml: null, finalAppName: "", finalStmtXml: null, finalStmtName: ""
         };
 
@@ -192,7 +185,6 @@
             log.scrollTop = log.scrollHeight;
         };
 
-        // --- DOM Helpers ---
         function findNode(parent, tagName) {
             if (!parent) return null;
             let list = parent.getElementsByTagName(tagName);
@@ -235,16 +227,35 @@
             });
         }
 
-        // --- Logic Helpers ---
-        function findBestMatch(candidates, filePayerAcc, filePayeeAcc) {
+        // --- MATCHING ENGINE v1.35 ---
+        function findBestMatch(candidates, filePayerAcc, filePayeeAcc, filePurpose) {
             if (!candidates || candidates.length === 0) return null;
+            const available = candidates.filter(c => !c.used);
+            if (available.length === 0) return null;
+
+            let bestCandidate = null;
+            let maxScore = -1;
+
             const fPayer = (filePayerAcc || "").trim();
             const fPayee = (filePayeeAcc || "").trim();
-            for (let c of candidates) {
-                if (c.dirSum === "1") { if (c.counterPartyAcc && fPayee === c.counterPartyAcc) return c; }
-                else if (c.dirSum === "0") { if (c.counterPartyAcc && fPayer === c.counterPartyAcc) return c; }
+            const fPurpNorm = (filePurpose || "").toLowerCase().replace(/\s+/g, '');
+
+            for (let c of available) {
+                let score = 0;
+                if (c.dirSum === "1") { if (fPayee && c.counterPartyAcc === fPayee) score += 10; } 
+                else { if (fPayer && c.counterPartyAcc === fPayer) score += 10; }
+
+                const cPurpNorm = (c.purpose || "").toLowerCase().replace(/\s+/g, '');
+                if (fPurpNorm && cPurpNorm) {
+                    if (fPurpNorm.includes(cPurpNorm) || cPurpNorm.includes(fPurpNorm)) {
+                        score += 5;
+                    }
+                }
+                if (score > maxScore) { maxScore = score; bestCandidate = c; }
             }
-            return candidates[0]; 
+            if (!bestCandidate && available.length > 0) { bestCandidate = available[0]; }
+            if (bestCandidate) { bestCandidate.used = true; }
+            return bestCandidate;
         }
 
         function isIncomeKbk(kbk) {
@@ -277,22 +288,54 @@
             }
         }
 
+        // === UPDATED: getAddClassAndKosgu v1.37 ===
         function getAddClassAndKosgu(text, kbk, dirSum) {
-            if (!text || !kbk) return "";
-            const escKbk = kbk.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
-            const regexGroup = new RegExp(`\\(${escKbk}(.*?)\\)`, "i");
-            const matchGroup = text.match(regexGroup);
-            if (!matchGroup) return "";
-
-            const innerContent = matchGroup[1]; 
+            if (!text) return "";
             let addClass = "";
-            const parts = innerContent.split(/[;,]/);
-            if (parts.length > 1 && parts[1].trim() !== "") {
-                addClass = parts[1].trim();
-            } else if (innerContent.trim().length > 1) {
-                addClass = innerContent.replace(/[;,]/, "").trim();
+            let kosgu = "";
+
+            // 1. Try to find AddClass inside brackets WITH KBK
+            if (kbk) {
+                const escKbk = kbk.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
+                const regexGroup = new RegExp(`\\(${escKbk}(.*?)\\)`, "i");
+                const matchGroup = text.match(regexGroup);
+
+                if (matchGroup) {
+                    const innerContent = matchGroup[1]; 
+                    const parts = innerContent.split(/[;,]/);
+                    if (parts.length > 1 && parts[1].trim() !== "") {
+                        addClass = parts[1].trim();
+                    } else if (innerContent.trim().length > 1) {
+                        addClass = innerContent.replace(/[;,]/, "").trim();
+                    }
+
+                    if (dirSum !== "0") {
+                        const groupEndIndex = matchGroup.index + matchGroup[0].length;
+                        const textAfter = text.substring(groupEndIndex);
+                        const regexKosgu = /^\s*\(([^)]+)\)/;
+                        const matchKosgu = textAfter.match(regexKosgu);
+                        if (matchKosgu) kosgu = matchKosgu[1]; 
+                    }
+                }
             }
 
+            // 2. FALLBACK (Fixed in v1.37)
+            if (!addClass) {
+                const regexAllGroups = /\(([^)]+)\)/g;
+                let m;
+                while ((m = regexAllGroups.exec(text)) !== null) {
+                    const content = m[1].trim();
+                    // NEW CHECK: Must NOT contain semicolon to avoid complex composite blocks
+                    if ((content.startsWith("9") || content.startsWith("0")) && 
+                        content.length !== 20 && 
+                        !content.includes(";")) {
+                        addClass = content;
+                        break; 
+                    }
+                }
+            }
+
+            // 3. SANITIZE
             if (addClass) {
                 const garbageMatch = addClass.match(/(л\/с|лс|№|лиц\/сч)/i);
                 if (garbageMatch) {
@@ -302,12 +345,6 @@
 
             if (dirSum === "0") return addClass;
             else {
-                let kosgu = "";
-                const groupEndIndex = matchGroup.index + matchGroup[0].length;
-                const textAfter = text.substring(groupEndIndex);
-                const regexKosgu = /^\s*\(([^)]+)\)/;
-                const matchKosgu = textAfter.match(regexKosgu);
-                if (matchKosgu) kosgu = matchKosgu[1]; 
                 if (addClass && kosgu) return `${addClass}(${kosgu})`;
                 else if (!addClass && kosgu) return `(${kosgu})`;
                 else if (addClass && !kosgu) return addClass;
@@ -317,10 +354,8 @@
 
         function getTypeKBK(dirSum) { return (dirSum === "1") ? "10" : "20"; }
 
-        // --- CONVERTER V3 LOGIC ---
         function convertInterToFinal(interDoc, docsED, docsRSKP) {
             logger("🔄 Запуск конвертации промежуточной выписки...", "warn");
-            
             const ownerAccount = interDoc.querySelector("ksNumber")?.textContent.trim() || "";
             const db = {};
 
@@ -351,18 +386,14 @@
                 } catch(e){}
             }
 
-            // 2. Read Settings
             const tofkCd = document.getElementById('valTofkCode').value;
             const tofkNm = document.getElementById('valTofkName').value;
             const orgCd = document.getElementById('valOrgCode').value;
 
-            // 3. Generate XML
             const rawDocNum = interDoc.querySelector("ttlPrtDocNum")?.textContent || "";
             const docNum = rawDocNum.replace("П-", "И-");
-            
             const rawDate = interDoc.querySelector("ttlPrtDocDateForRep")?.textContent || "";
             const shortDate = rawDate.split('T')[0];
-            
             const balStart = interDoc.querySelector("startBalance")?.textContent || "0.00";
             const balEnd = interDoc.querySelector("endBalance")?.textContent || "0.00";
             const orgName = interDoc.querySelector("ttlPrtNameOrg")?.textContent || "";
@@ -400,21 +431,21 @@
                 const amtOut = isDebit ? iAmount.toFixed(2) : "0.00";
 
                 allItemsXml += `
-    <Oper_BudData_ITEM>
-        <Line_Num>${idx + 1}</Line_Num>
-        <DocNum>${iNum}</DocNum>
-        <DocDate>${iDate}</DocDate>
-        <DocGUID>${guid}</DocGUID>
-        <OperType>01</OperType>
-        <Bic_Corr>${iCorrBic}</Bic_Corr>
-        <AmountIn>${amtIn}</AmountIn>
-        <AmountOut>${amtOut}</AmountOut>
-        <SendAcc>${finalSendAcc}</SendAcc>
-        <PurpPay>${esc(iPurp)}</PurpPay>
-    </Oper_BudData_ITEM>`;
+        <Oper_BudData_ITEM>
+            <Line_Num>${idx + 1}</Line_Num>
+            <DocNum>${iNum}</DocNum>
+            <DocDate>${iDate}</DocDate>
+            <DocGUID>${guid}</DocGUID>
+            <OperType>01</OperType>
+            <Bic_Corr>${iCorrBic}</Bic_Corr>
+            <AmountIn>${amtIn}</AmountIn>
+            <AmountOut>${amtOut}</AmountOut>
+            <SendAcc>${finalSendAcc}</SendAcc>
+            <PurpPay>${esc(iPurp)}</PurpPay>
+        </Oper_BudData_ITEM>`;
             });
 
-            const finalXmlStr = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+            return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <self:SKP_REPORT_KS xmlns:self="http://www.roskazna.ru/eb/domain/SKP_REPORT_KS/formular" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" versionID="1.0" metaType="formular" xsi:schemaLocation="http://www.roskazna.ru/eb/domain/skp_report_ks/formular formulars.xsd">
     <TtlPrt_DocNum>${docNum}</TtlPrt_DocNum>
     <TtlPrt_DocDate>${shortDate}</TtlPrt_DocDate>
@@ -441,10 +472,7 @@
     <TtlPrt_NameOpenTOFK>${tofkNm}</TtlPrt_NameOpenTOFK>
     <TtlPrt_CodeOpenTOFK>${tofkCd}</TtlPrt_CodeOpenTOFK>
 </self:SKP_REPORT_KS>`;
-
-            return finalXmlStr;
         }
-
 
         const handleFiles = async (files) => {
             if (files.length === 0) return;
@@ -453,7 +481,7 @@
             Data.interFound = false; Data.interDoc = null;
             document.getElementById('dlGroup').style.display = 'none';
             document.getElementById('hintOrgName').textContent = ""; 
-            document.getElementById('conversionPanel').style.display = 'none'; // Hide by default
+            document.getElementById('conversionPanel').style.display = 'none';
             
             const logEl = document.getElementById('log'); logEl.innerHTML = ""; 
 
@@ -473,12 +501,8 @@
                         Data.interFound = true;
                         Data.interDoc = doc;
                         Data.interName = file.name;
-                        
                         const orgName = getVal(doc, "ttlPrtNameOrg");
-                        if(orgName) {
-                            document.getElementById('hintOrgName').textContent = "Из файла: " + orgName;
-                        }
-
+                        if(orgName) document.getElementById('hintOrgName').textContent = "Из файла: " + orgName;
                     } else if (rootName === "ED101" || rootName === "ED108") {
                         Data.docsED.push({ name: file.name, xmlDoc: doc });
                     } else if (rootName.includes("MSC_TransfOrderAcc")) {
@@ -487,19 +511,10 @@
                 } catch (err) { logger(`Сбой чтения ${file.name}: ${err.message}`, "err"); }
             }
             
-            // --- DECISION LOGIC ---
             if (!Data.statementFound && Data.interFound) {
                 logger(`Найдена промежуточная выписка: ${Data.interName}.`, "warn");
-                // SHOW SETTINGS PANEL
                 document.getElementById('conversionPanel').style.display = 'block';
-                
-                try {
-                    // Try conversion immediately to see if it works, but real conversion happens on RUN
-                    // Actually, we can wait for RUN button.
-                    logger(`Готов к конвертации. Проверьте настройки ниже.`, "success");
-                } catch(e) {
-                    logger("Ошибка подготовки: " + e.message, "err");
-                }
+                logger(`Готов к конвертации. Проверьте настройки ниже.`, "success");
             } else if (Data.statementFound && Data.interFound) {
                 logger(`Игнорирую промежуточную выписку, т.к. найдена итоговая.`, "success");
             }
@@ -538,11 +553,13 @@
                     const realSum = amOut + amIn;
                     let dirSum = (amOut > 0) ? "1" : "0";
                     let counterPartyAcc = (amOut > 0) ? getVal(item, "RecipAcc") : getVal(item, "SendAcc");
+                    
+                    let purpose = getVal(item, "PurpPay") || getVal(item, "Purpose");
 
                     if (num && guid) {
                         const key = genKey(num, realSum);
                         if (!Data.map[key]) Data.map[key] = [];
-                        Data.map[key].push({ node: item, originalGuid: guid, operType, dirSum, counterPartyAcc });
+                        Data.map[key].push({ node: item, originalGuid: guid, operType, dirSum, counterPartyAcc, purpose: purpose, used: false });
                         count++;
                     }
                 });
@@ -570,8 +587,7 @@
             else { stDiv.textContent = "Нет"; }
 
             const hasFiles = (Data.docsED.length > 0 || Data.docsRSKP.length > 0);
-            const canRun = (Data.statementFound || Data.interFound) && hasFiles;
-            document.getElementById('btnRun').disabled = !canRun;
+            document.getElementById('btnRun').disabled = !(Data.statementFound && hasFiles);
         }
 
         function updateStatementGuid(statementNode, newGuid) {
@@ -582,7 +598,8 @@
             logger("⚙️ Сборка документа...");
             const parser = new DOMParser();
 
-            // IF NO FINAL STATEMENT BUT INTERMEDIATE EXISTS -> CONVERT NOW
+            for(let key in Data.map) { Data.map[key].forEach(c => c.used = false); }
+
             if (!Data.statementFound && Data.interFound) {
                 try {
                     const convertedXmlStr = convertInterToFinal(Data.interDoc, Data.docsED, Data.docsRSKP);
@@ -613,13 +630,16 @@
                     if (!candidates) { logger(`Пропуск ED №${docNo}: нет в выписке`, "warn"); continue; }
                     const p = findNode(ed, "Payer"); const r = findNode(ed, "Payee");
                     const filePayerAcc = p?.getAttribute("PersonalAcc"); const filePayeeAcc = r?.getAttribute("PersonalAcc");
-                    const info = findBestMatch(candidates, filePayerAcc, filePayeeAcc);
                     
+                    const purp = getVal(ed, "Purpose"); 
+                    const info = findBestMatch(candidates, filePayerAcc, filePayeeAcc, purp);
+                    
+                    if (!info) { logger(`Все совпадения для ED №${docNo} уже заняты`, "warn"); continue; }
+
                     let finalGuid = fileGuid || info.originalGuid;
                     if (fileGuid) updateStatementGuid(info.node, finalGuid);
 
                     const docDate = getAttr(ed, "AccDoc", "AccDocDate");
-                    const purp = getVal(ed, "Purpose");
                     
                     let foundKbk = null; if (optKbk) foundKbk = findKbkComplex(purp, info.dirSum);
                     let kbkBlock = ""; let addClassTag = "";
@@ -693,12 +713,15 @@
                     if (!candidates) { logger(`Пропуск РСКП №${docNo}: нет в выписке`, "warn"); continue; }
 
                     const filePayerAcc = getVal(root, "Payer_AccNum"); const filePayeeAcc = getVal(root, "Recip_AccNum");
-                    const info = findBestMatch(candidates, filePayerAcc, filePayeeAcc);
+                    const purp = getVal(root, "DepInfo_PayPurpose"); 
+
+                    const info = findBestMatch(candidates, filePayerAcc, filePayeeAcc, purp);
                     
+                    if (!info) { logger(`Все совпадения для РСКП №${docNo} уже заняты`, "warn"); continue; }
+
                     let finalGuid = fileGuid || info.originalGuid;
                     if (fileGuid) updateStatementGuid(info.node, finalGuid);
 
-                    const purp = getVal(root, "DepInfo_PayPurpose");
                     const xmlKbk = getVal(root, "FAHTeh > FAHTeh_ITEM > Payer_KBK");
                     
                     let foundKbk = null; if (optKbk) foundKbk = findKbkComplex(purp, info.dirSum);
@@ -811,7 +834,7 @@
         }
 
         const GITHUB_USERNAME = "rintaru123";
-        const REPO_NAME = "EBP-account-statement-packager"; 
+        const REPO_NAME = "EBP-account-statement-packager";
         const VERSION_JSON_URL = `https://${GITHUB_USERNAME}.github.io/${REPO_NAME}/version.json`;
         async function checkForUpdates() {
             try {
