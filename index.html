@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Сборщик выписки (v1.37)</title>
+    <title>Сборщик выписки (v1.37.1)</title>
     <style>
         body { font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif; max-width: 950px; margin: 30px auto; background-color: #f4f6f9; color: #333; }
         .container { background: white; padding: 40px; border-radius: 16px; box-shadow: 0 10px 30px rgba(0,0,0,0.05); }
@@ -71,7 +71,7 @@
 <body>
 
     <div class="container">
-        <h1>🛠 Сборщик выписки <span style="font-size: 0.6em; color: #adb5bd; vertical-align: middle;">v1.37</span></h1>
+        <h1>🛠 Сборщик выписки <span style="font-size: 0.6em; color: #adb5bd; vertical-align: middle;">v1.37.1</span></h1>
         <div class="subtitle">
             Улучшен парсинг Доп.Классификации (игнорирование сложных блоков), очистка л/с.
         </div>
@@ -147,7 +147,6 @@
 
     <div id="log">Ожидание загрузки файлов...</div>
 
-    <!-- Обновленный блок авторов -->
     <div class="authors">
         <div style="margin-bottom: 5px; font-weight: 600; color: #495057;">
             Разработано в рамках проекта "Эффективный регион" <br>
@@ -158,12 +157,12 @@
             | Лицензия: MIT
         </div>
         <div style="font-size: 0.85em; color: #adb5bd; margin-top: 5px;">
-            v1.37 | Design by Gemini 3-pro
+            v1.37.1 | Design by Gemini 3-pro
         </div>
     </div>
 
     <script>
-        const APP_VERSION = "v1.37";
+        const APP_VERSION = "v1.37.1";
 
         const Data = {
             mainGuid: "", mainDate: "", map: {}, docsED: [], docsRSKP: [], 
@@ -294,7 +293,6 @@
             let addClass = "";
             let kosgu = "";
 
-            // 1. Try to find AddClass inside brackets WITH KBK
             if (kbk) {
                 const escKbk = kbk.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
                 const regexGroup = new RegExp(`\\(${escKbk}(.*?)\\)`, "i");
@@ -319,23 +317,18 @@
                 }
             }
 
-            // 2. FALLBACK (Fixed in v1.37)
             if (!addClass) {
                 const regexAllGroups = /\(([^)]+)\)/g;
                 let m;
                 while ((m = regexAllGroups.exec(text)) !== null) {
                     const content = m[1].trim();
-                    // NEW CHECK: Must NOT contain semicolon to avoid complex composite blocks
-                    if ((content.startsWith("9") || content.startsWith("0")) && 
-                        content.length !== 20 && 
-                        !content.includes(";")) {
+                    if ((content.startsWith("9") || content.startsWith("0")) && content.length !== 20 && !content.includes(";")) {
                         addClass = content;
                         break; 
                     }
                 }
             }
 
-            // 3. SANITIZE
             if (addClass) {
                 const garbageMatch = addClass.match(/(л\/с|лс|№|лиц\/сч)/i);
                 if (garbageMatch) {
@@ -587,7 +580,10 @@
             else { stDiv.textContent = "Нет"; }
 
             const hasFiles = (Data.docsED.length > 0 || Data.docsRSKP.length > 0);
-            document.getElementById('btnRun').disabled = !(Data.statementFound && hasFiles);
+            
+            // FIX v1.37.1: Allow run if ANY statement found (Final OR Intermediate)
+            const hasStatement = Data.statementFound || Data.interFound;
+            document.getElementById('btnRun').disabled = !(hasStatement && hasFiles);
         }
 
         function updateStatementGuid(statementNode, newGuid) {
