@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Сборщик выписки (v1.38)</title>
+    <title>Сборщик выписки (v1.38.1)</title>
     <style>
         body { font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif; max-width: 950px; margin: 30px auto; background-color: #f4f6f9; color: #333; }
         .container { background: white; padding: 40px; border-radius: 16px; box-shadow: 0 10px 30px rgba(0,0,0,0.05); }
@@ -71,9 +71,9 @@
 <body>
 
     <div class="container">
-        <h1>🛠 Сборщик выписки <span style="font-size: 0.6em; color: #adb5bd; vertical-align: middle;">v1.38</span></h1>
+        <h1>🛠 Сборщик выписки <span style="font-size: 0.6em; color: #adb5bd; vertical-align: middle;">v1.38.1</span></h1>
         <div class="subtitle">
-            Корректировка даты выписки по номеру документа, улучшенный парсинг.
+            Коррекция даты выписки (строгий разбор номера), очистка л/с, конвертация.
         </div>
         
         <input type="file" id="fileInput" multiple accept=".xml">
@@ -147,6 +147,7 @@
 
     <div id="log">Ожидание загрузки файлов...</div>
 
+    <!-- Блок авторов -->
     <div class="authors">
         <div style="margin-bottom: 5px; font-weight: 600; color: #495057;">
             Разработано в рамках проекта "Эффективный регион" <br>
@@ -157,12 +158,12 @@
             | Лицензия: MIT
         </div>
         <div style="font-size: 0.85em; color: #adb5bd; margin-top: 5px;">
-            v1.38 | Design by Gemini 3-pro
+            v1.38.1 | Design by Gemini 3-pro
         </div>
     </div>
 
     <script>
-        const APP_VERSION = "v1.38";
+        const APP_VERSION = "v1.38.1";
 
         const Data = {
             mainGuid: "", mainDate: "", map: {}, docsED: [], docsRSKP: [], 
@@ -184,6 +185,7 @@
             log.scrollTop = log.scrollHeight;
         };
 
+        // --- DOM Helpers ---
         function findNode(parent, tagName) {
             if (!parent) return null;
             let list = parent.getElementsByTagName(tagName);
@@ -226,24 +228,37 @@
             });
         }
 
-        // === NEW HELPERS v1.38 ===
-        // Extracts date from doc number string like "И-973Q4162-07032026-001" -> "2026-03-07"
-        function parseDateFromNum(docNum) {
-            if (!docNum) return "";
+        // --- UPDATED: STRICT DATE EXTRACTION v1.38.1 ---
+        // Format: Prefix-Account-DDMMYYYY-Seq (e.g., И-973Q4162-07032026-001)
+        // We strictly take the 3rd part (index 2)
+        function extractDateFromDocNum(docNum) {
+            if (!docNum) return null;
             const parts = docNum.split('-');
-            // Find a part that is exactly 8 digits
-            const datePart = parts.find(p => /^\d{8}$/.test(p));
             
-            if (datePart) {
-                const day = datePart.substring(0, 2);
-                const month = datePart.substring(2, 4);
-                const year = datePart.substring(4, 8);
-                return `${year}-${month}-${day}`;
+            // Strictly check for 3rd element
+            if (parts.length >= 3) {
+                const datePart = parts[2]; // Index 2 is the 3rd part
+                
+                // Validate it looks like a date DDMMYYYY
+                if (/^\d{8}$/.test(datePart)) {
+                    const day = datePart.substring(0, 2);
+                    const month = datePart.substring(2, 4);
+                    const year = datePart.substring(4, 8);
+                    
+                    // Simple validation
+                    const yearNum = parseInt(year);
+                    const monthNum = parseInt(month);
+                    const dayNum = parseInt(day);
+                    
+                    if(yearNum > 2000 && monthNum > 0 && monthNum <= 12 && dayNum > 0 && dayNum <= 31) {
+                        return `${year}-${month}-${day}`;
+                    }
+                }
             }
-            return "";
+            return null;
         }
 
-        // --- MATCHING ENGINE ---
+        // --- MATCHING ENGINE v1.35 ---
         function findBestMatch(candidates, filePayerAcc, filePayeeAcc, filePurpose) {
             if (!candidates || candidates.length === 0) return null;
             const available = candidates.filter(c => !c.used);
@@ -363,6 +378,7 @@
 
         function getTypeKBK(dirSum) { return (dirSum === "1") ? "10" : "20"; }
 
+        // --- CONVERTER V3 LOGIC (Updated v1.38.1) ---
         function convertInterToFinal(interDoc, docsED, docsRSKP) {
             logger("🔄 Запуск конвертации промежуточной выписки...", "warn");
             const ownerAccount = interDoc.querySelector("ksNumber")?.textContent.trim() || "";
@@ -402,10 +418,11 @@
             const rawDocNum = interDoc.querySelector("ttlPrtDocNum")?.textContent || "";
             const docNum = rawDocNum.replace("П-", "И-");
             
-            // === DATE FIX v1.38 ===
-            let shortDate = parseDateFromNum(rawDocNum);
+            // --- FIX DATE v1.38.1 ---
+            let shortDate = extractDateFromDocNum(rawDocNum);
+            
+            // Fallback
             if (!shortDate) {
-                // Fallback to old method
                 const rawDate = interDoc.querySelector("ttlPrtDocDateForRep")?.textContent || "";
                 shortDate = rawDate.split('T')[0];
             }
@@ -553,19 +570,20 @@
             try {
                 Data.statementDoc = xml; Data.statementName = fileName;
                 
-                // === DATE FIX v1.38 ===
-                const docNumVal = getVal(xml, "TtlPrt_DocNum");
-                const extractedDate = parseDateFromNum(docNumVal);
+                // --- FIX DATE v1.38.1 ---
+                const docNum = getVal(xml, "TtlPrt_DocNum");
+                let docDate = getVal(xml, "TtlPrt_DocDate");
+                
+                // New function usage
+                const extractedDate = extractDateFromDocNum(docNum);
                 
                 if (extractedDate) {
-                    Data.mainDate = extractedDate;
-                    // OVERRIDE Date in DOM for File Saving
+                    docDate = extractedDate;
                     const dateNode = findNode(xml, "TtlPrt_DocDate");
-                    if (dateNode) dateNode.textContent = extractedDate;
-                } else {
-                    Data.mainDate = getVal(xml, "TtlPrt_DocDate");
+                    if(dateNode) dateNode.textContent = docDate;
                 }
 
+                Data.mainDate = docDate;
                 let stmInfo = findNode(xml, "StmInfrmtn_TF") || findNode(xml, "StmInfrmtn");
                 Data.mainGuid = getVal(stmInfo, "GUID");
                 let itemsList = xml.getElementsByTagName("*");
@@ -617,6 +635,7 @@
 
             const hasFiles = (Data.docsED.length > 0 || Data.docsRSKP.length > 0);
             
+            // Allow run if ANY statement found
             const hasStatement = Data.statementFound || Data.interFound;
             document.getElementById('btnRun').disabled = !(hasStatement && hasFiles);
         }
