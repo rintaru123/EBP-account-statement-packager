@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Сборщик выписки (v1.39)</title>
+    <title>Сборщик выписки (v1.40)</title>
     <style>
         body { font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif; max-width: 950px; margin: 30px auto; background-color: #f4f6f9; color: #333; }
         .container { background: white; padding: 40px; border-radius: 16px; box-shadow: 0 10px 30px rgba(0,0,0,0.05); }
@@ -71,9 +71,9 @@
 <body>
 
     <div class="container">
-        <h1>🛠 Сборщик выписки <span style="font-size: 0.6em; color: #adb5bd; vertical-align: middle;">v1.39</span></h1>
+        <h1>🛠 Сборщик выписки <span style="font-size: 0.6em; color: #adb5bd; vertical-align: middle;">v1.40</span></h1>
         <div class="subtitle">
-            Умная очистка доп.классификации (удаление сумм и мусора), коррекция даты.
+            Умная конвертация, защита от дублей GUID, очистка л/с.
         </div>
         
         <input type="file" id="fileInput" multiple accept=".xml">
@@ -147,7 +147,6 @@
 
     <div id="log">Ожидание загрузки файлов...</div>
 
-    <!-- Блок авторов -->
     <div class="authors">
         <div style="margin-bottom: 5px; font-weight: 600; color: #495057;">
             Разработано в рамках проекта "Эффективный регион" <br>
@@ -158,12 +157,12 @@
             | Лицензия: MIT
         </div>
         <div style="font-size: 0.85em; color: #adb5bd; margin-top: 5px;">
-            v1.39 | Design by Gemini 3-pro
+            v1.40 (Fix) | Design by Gemini 3-pro
         </div>
     </div>
 
     <script>
-        const APP_VERSION = "v1.39";
+        const APP_VERSION = "v1.40";
 
         const Data = {
             mainGuid: "", mainDate: "", map: {}, docsED: [], docsRSKP: [], 
@@ -221,14 +220,22 @@
         function genKey(num, amount) { return `${num}_${Math.abs(parseFloat(amount)).toFixed(2)}`; }
         function readFile(file) { return new Promise((r, j) => { const reader = new FileReader(); reader.onload = () => r(reader.result); reader.onerror = j; reader.readAsText(file); }); }
         
+        // --- FIXED UUID GENERATOR (No Negatives) ---
+        let _guidSeq = 0;
         function uuid() {
-            return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
-                var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
+            const now = Date.now();
+            _guidSeq++;
+            // Logical shift >>> 0 to convert to unsigned 32-bit int
+            const timeHex = (now >>> 0).toString(16).padStart(8, '0');
+            const seqHex = (_guidSeq & 0xFFFF).toString(16).padStart(4, '0');
+            const tail = '4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+                const r = Math.random() * 16 | 0;
+                const v = c === 'x' ? r : (r & 0x3 | 0x8);
                 return v.toString(16);
             });
+            return `${timeHex}-${seqHex}-${tail}`;
         }
 
-        // --- DATE EXTRACTION ---
         function extractDateFromDocNum(docNum) {
             if (!docNum) return null;
             const parts = docNum.split('-');
@@ -308,25 +315,20 @@
             }
         }
 
-        // === UPDATED: getAddClassAndKosgu v1.39 ===
         function getAddClassAndKosgu(text, kbk, dirSum) {
             if (!text) return "";
             let addClass = "";
             let kosgu = "";
 
-            // Helper to clean potential AddClass: strip '=', remove garbage
             const cleanPotentialAddClass = (raw) => {
                 if (!raw) return "";
-                // 1. Remove sums (split by =)
                 let cleaned = raw.split('=')[0].trim();
-                // 2. Check basic validity (starts with 9 or 0, reasonable length)
                 if (cleaned.length > 3 && (cleaned.startsWith('9') || cleaned.startsWith('0'))) {
                     return cleaned;
                 }
                 return "";
             };
 
-            // 1. Search inside brackets WITH KBK
             if (kbk) {
                 const escKbk = kbk.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
                 const regexGroup = new RegExp(`\\(${escKbk}(.*?)\\)`, "i");
@@ -334,15 +336,13 @@
 
                 if (matchGroup) {
                     const innerContent = matchGroup[1]; 
-                    // Split by ; or ,
                     const parts = innerContent.split(/[;,]/);
                     
-                    // Iterate parts to find the first valid AddClass
                     for (let part of parts) {
                         let potential = cleanPotentialAddClass(part.trim());
                         if (potential) {
                             addClass = potential;
-                            break; // Stop at first valid match
+                            break; 
                         }
                     }
 
@@ -356,17 +356,14 @@
                 }
             }
 
-            // 2. FALLBACK: Separate brackets
             if (!addClass) {
                 const regexAllGroups = /\(([^)]+)\)/g;
                 let m;
                 while ((m = regexAllGroups.exec(text)) !== null) {
                     const content = m[1].trim();
-                    // Split content by ; or , just in case
                     const parts = content.split(/[;,]/);
                     for (let part of parts) {
                         let potential = cleanPotentialAddClass(part.trim());
-                        // Ensure it's not the KBK itself (length 20)
                         if (potential && potential.length !== 20) {
                             addClass = potential;
                             break;
@@ -376,7 +373,6 @@
                 }
             }
 
-            // 3. SANITIZE (Extra layer for L/S)
             if (addClass) {
                 const garbageMatch = addClass.match(/(л\/с|лс|№|лиц\/сч)/i);
                 if (garbageMatch) {
@@ -395,12 +391,19 @@
 
         function getTypeKBK(dirSum) { return (dirSum === "1") ? "10" : "20"; }
 
+        // --- CONVERTER V3 LOGIC (Reverted to single list + Fix UUID) ---
         function convertInterToFinal(interDoc, docsED, docsRSKP) {
             logger("🔄 Запуск конвертации промежуточной выписки...", "warn");
             const ownerAccount = interDoc.querySelector("ksNumber")?.textContent.trim() || "";
             const db = {};
 
-            // 1. Build DB
+            const addToDb = (num, data) => {
+                if(!num) return;
+                if (!db[num]) db[num] = [];
+                db[num].push({ ...data, used: false });
+            };
+
+            // 1. Build DB - ED
             for (const item of docsED) {
                 try {
                     const doc = item.xmlDoc;
@@ -410,10 +413,12 @@
                         let guid = ed.querySelector("GUID")?.textContent || uuid(); 
                         const payerAcc = ed.querySelector("Payer")?.getAttribute("PersonalAcc");
                         const payeeAcc = ed.querySelector("Payee")?.getAttribute("PersonalAcc");
-                        db[accDocNo] = { guid, payerAcc, payeeAcc };
+                        const purp = getVal(ed, "Purpose");
+                        addToDb(accDocNo, { guid, payerAcc, payeeAcc, purpose: purp });
                     }
                 } catch(e){}
             }
+            // 1. Build DB - RSKP
             for (const item of docsRSKP) {
                 try {
                     const root = item.xmlDoc.documentElement;
@@ -422,7 +427,8 @@
                         const guid = getVal(root, "AccDoc_Guid") || uuid();
                         const payerAcc = getVal(root, "Payer_CheckAcc");
                         const recipAcc = getVal(root, "Recip_CheckAcc");
-                        db[docNum] = { guid, payerAcc, payeeAcc: recipAcc };
+                        const purp = getVal(root, "DepInfo_PayPurpose");
+                        addToDb(docNum, { guid, payerAcc, payeeAcc: recipAcc, purpose: purp });
                     }
                 } catch(e){}
             }
@@ -456,7 +462,28 @@
                 const iCorrBic = item.querySelector("corrBIC")?.textContent || "";
                 const iPurp = item.querySelector("purpPay")?.textContent || "";
                 
-                const info = db[iNum];
+                // MATCHING
+                let info = null;
+                if (db[iNum] && db[iNum].length > 0) {
+                    let bestCand = null;
+                    let maxScore = -1;
+                    const iPurpNorm = iPurp.toLowerCase().replace(/\s+/g, '');
+
+                    for (let c of db[iNum]) {
+                        if (c.used) continue;
+                        let score = 0;
+                        const cPurpNorm = (c.purpose || "").toLowerCase().replace(/\s+/g, '');
+                        if (iPurpNorm && cPurpNorm && (iPurpNorm.includes(cPurpNorm) || cPurpNorm.includes(iPurpNorm))) {
+                            score = 10;
+                        }
+                        if (score > maxScore) { maxScore = score; bestCand = c; }
+                    }
+                    
+                    if (!bestCand) bestCand = db[iNum].find(c => !c.used);
+                    info = bestCand;
+                    if(info) info.used = true;
+                }
+
                 let guid = uuid();
                 let isDebit = false; 
                 let finalSendAcc = item.querySelector("sendAcc")?.textContent || "";
