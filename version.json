@@ -1,6 +1,6 @@
 {
-  "version": "v1.40",
-  "date": "2026-03-12",
+  "version": "v1.40.001",
+  "date": "2026-03-13",
   "download_url": "https://github.com/rintaru123/EBP-account-statement-packager/releases/latest",
-  "message": "Исправлен процесс конвертации промежуточной выписки в итоговую. Переписан генератор GUID для платежных поручений"
+  "message": "Строгая проверка КОСГУ (3 символа), защита от дублей GUID, очистка л/с"
 }
