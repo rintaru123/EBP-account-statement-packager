@@ -1,6 +1,6 @@
 {
-  "version": "v1.40.001",
-  "date": "2026-03-13",
+  "version": "v1.40.002",
+  "date": "2026-03-17",
   "download_url": "https://github.com/rintaru123/EBP-account-statement-packager/releases/latest",
-  "message": "Строгая проверка КОСГУ (3 символа), защита от дублей GUID, очистка л/с"
+  "message": "Исправлена валидация налоговых полей (РСКП)"
 }

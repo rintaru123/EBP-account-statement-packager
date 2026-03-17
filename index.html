@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Сборщик выписки (v1.40.001)</title>
+    <title>Сборщик выписки (v1.40.002)</title>
     <style>
         body { font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif; max-width: 950px; margin: 30px auto; background-color: #f4f6f9; color: #333; }
         .container { background: white; padding: 40px; border-radius: 16px; box-shadow: 0 10px 30px rgba(0,0,0,0.05); }
@@ -71,9 +71,9 @@
 <body>
 
     <div class="container">
-        <h1>🛠 Сборщик выписки <span style="font-size: 0.6em; color: #adb5bd; vertical-align: middle;">v1.40.001</span></h1>
+        <h1>🛠 Сборщик выписки <span style="font-size: 0.6em; color: #adb5bd; vertical-align: middle;">v1.40.002</span></h1>
         <div class="subtitle">
-            Строгая проверка КОСГУ (3 символа), защита от дублей GUID, очистка л/с.
+            Исправлена валидация налоговых полей (РСКП), строгий КОСГУ, защита от дублей.
         </div>
         
         <input type="file" id="fileInput" multiple accept=".xml">
@@ -157,12 +157,12 @@
             | Лицензия: MIT
         </div>
         <div style="font-size: 0.85em; color: #adb5bd; margin-top: 5px;">
-            v1.40.001 | Design by Gemini 3-pro
+            v1.40.002 | Design by Gemini 3-pro
         </div>
     </div>
 
     <script>
-        const APP_VERSION = "v1.40.001";
+        const APP_VERSION = "v1.40.002";
 
         const Data = {
             mainGuid: "", mainDate: "", map: {}, docsED: [], docsRSKP: [], 
@@ -184,7 +184,6 @@
             log.scrollTop = log.scrollHeight;
         };
 
-        // --- DOM Helpers ---
         function findNode(parent, tagName) {
             if (!parent) return null;
             let list = parent.getElementsByTagName(tagName);
@@ -220,7 +219,6 @@
         function genKey(num, amount) { return `${num}_${Math.abs(parseFloat(amount)).toFixed(2)}`; }
         function readFile(file) { return new Promise((r, j) => { const reader = new FileReader(); reader.onload = () => r(reader.result); reader.onerror = j; reader.readAsText(file); }); }
         
-        // --- FIXED UUID GENERATOR (No Negatives) ---
         let _guidSeq = 0;
         function uuid() {
             const now = Date.now();
@@ -255,7 +253,6 @@
             return null;
         }
 
-        // --- MATCHING ENGINE ---
         function findBestMatch(candidates, filePayerAcc, filePayeeAcc, filePurpose) {
             if (!candidates || candidates.length === 0) return null;
             const available = candidates.filter(c => !c.used);
@@ -314,7 +311,6 @@
             }
         }
 
-        // --- UPDATED: getAddClassAndKosgu v1.40.001 (Strict KOSGU) ---
         function getAddClassAndKosgu(text, kbk, dirSum) {
             if (!text) return "";
             let addClass = "";
@@ -351,14 +347,11 @@
                         const textAfter = text.substring(groupEndIndex);
                         const regexKosgu = /^\s*\(([^)]+)\)/;
                         const matchKosgu = textAfter.match(regexKosgu);
-                        
-                        // FIX v1.40.001: Check Strict KOSGU (only 3 digits)
                         if (matchKosgu) {
                             const rawKosgu = matchKosgu[1].trim();
                             if (/^\d{3}$/.test(rawKosgu)) {
                                 kosgu = rawKosgu;
                             }
-                            // Otherwise ignore invalid KOSGU string
                         } 
                     }
                 }
@@ -399,7 +392,6 @@
 
         function getTypeKBK(dirSum) { return (dirSum === "1") ? "10" : "20"; }
 
-        // --- CONVERTER V3 LOGIC (Updated v1.40) ---
         function convertInterToFinal(interDoc, docsED, docsRSKP) {
             logger("🔄 Запуск конвертации промежуточной выписки...", "warn");
             const ownerAccount = interDoc.querySelector("ksNumber")?.textContent.trim() || "";
@@ -411,7 +403,6 @@
                 db[num].push({ ...data, used: false });
             };
 
-            // 1. Build DB - ED
             for (const item of docsED) {
                 try {
                     const doc = item.xmlDoc;
@@ -426,7 +417,6 @@
                     }
                 } catch(e){}
             }
-            // 1. Build DB - RSKP
             for (const item of docsRSKP) {
                 try {
                     const root = item.xmlDoc.documentElement;
@@ -470,7 +460,6 @@
                 const iCorrBic = item.querySelector("corrBIC")?.textContent || "";
                 const iPurp = item.querySelector("purpPay")?.textContent || "";
                 
-                // MATCHING
                 let info = null;
                 if (db[iNum] && db[iNum].length > 0) {
                     let bestCand = null;
@@ -486,7 +475,6 @@
                         }
                         if (score > maxScore) { maxScore = score; bestCand = c; }
                     }
-                    
                     if (!bestCand) bestCand = db[iNum].find(c => !c.used);
                     info = bestCand;
                     if(info) info.used = true;
@@ -841,9 +829,23 @@
                     let status = getVal(root, "DepInfo_TAX_DrawStat"); let basis = getVal(root, "DepInfo_TAX_PayReason");
                     let period = getVal(root, "DepInfo_TAX_Period"); let taxDocNo = getVal(root, "DepInfo_TAX_DocNo");
                     let taxDocDate = getVal(root, "DepInfo_TAX_DocDate");
-                    if (codeReven || oktmo) {
+                    
+                    // --- FIX v1.40.002: CHECK IF REVEN/STATUS EXISTS ---
+                    // Only render tax block if at least Code_Reven OR Status is present
+                    // If only OKTMO is present (which is common garbage), skip it.
+                    let taxBlock = "";
+                    if (codeReven || status) {
                         if (!status) status = "0"; if (!basis) basis = "0"; if (!period) period = "0";
                         if (!taxDocNo) taxDocNo = "0"; if (!taxDocDate) taxDocDate = "0";
+                        
+                        taxBlock = `
+            <Code_Reven>${codeReven}</Code_Reven>
+            ${makeTag("Code_OKTMO", oktmo)}
+            <Payer_status>${status}</Payer_status>
+            <Basis_Pay>${basis}</Basis_Pay>
+            <Tax_Period>${period}</Tax_Period>
+            <DocBase_Num>${taxDocNo}</DocBase_Num>
+            <DocBase_Date>${taxDocDate}</DocBase_Date>`;
                     }
 
                     resultOrder += `
@@ -879,13 +881,7 @@
                 <RecServOrg_BIK>${getVal(root, "Recip_BIK")}</RecServOrg_BIK>
                 <Recip_AccNum>${getVal(root, "Recip_CheckAcc")}</Recip_AccNum>
             </Actual_Recip>
-            <Code_Reven>${codeReven}</Code_Reven>
-            ${makeTag("Code_OKTMO", oktmo)}
-            <Payer_status>${status}</Payer_status>
-            <Basis_Pay>${basis}</Basis_Pay>
-            <Tax_Period>${period}</Tax_Period>
-            <DocBase_Num>${taxDocNo}</DocBase_Num>
-            <DocBase_Date>${taxDocDate}</DocBase_Date>
+            ${taxBlock}
             <Inf_Order_KBK>
                 <Inf_Order_KBK_ITEM>
                     ${rskpKbkBlock}
