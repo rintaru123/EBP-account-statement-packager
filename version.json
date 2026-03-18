@@ -1,6 +1,6 @@
 {
-  "version": "v1.40.002",
-  "date": "2026-03-17",
+  "version": "v1.40.003",
+  "date": "2026-03-18",
   "download_url": "https://github.com/rintaru123/EBP-account-statement-packager/releases/latest",
-  "message": "Исправлена валидация налоговых полей (РСКП)"
+  "message": "Удаление пустых финансовых документов из выписки (например, казначейских справок)"
 }

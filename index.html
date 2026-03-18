@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Сборщик выписки (v1.40.002)</title>
+    <title>Сборщик выписки (v1.40.003)</title>
     <style>
         body { font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif; max-width: 950px; margin: 30px auto; background-color: #f4f6f9; color: #333; }
         .container { background: white; padding: 40px; border-radius: 16px; box-shadow: 0 10px 30px rgba(0,0,0,0.05); }
@@ -71,9 +71,9 @@
 <body>
 
     <div class="container">
-        <h1>🛠 Сборщик выписки <span style="font-size: 0.6em; color: #adb5bd; vertical-align: middle;">v1.40.002</span></h1>
+        <h1>🛠 Сборщик выписки <span style="font-size: 0.6em; color: #adb5bd; vertical-align: middle;">v1.40.003</span></h1>
         <div class="subtitle">
-            Исправлена валидация налоговых полей (РСКП), строгий КОСГУ, защита от дублей.
+            Удаление пустых записей (справок), коррекция даты, конвертация.
         </div>
         
         <input type="file" id="fileInput" multiple accept=".xml">
@@ -157,12 +157,12 @@
             | Лицензия: MIT
         </div>
         <div style="font-size: 0.85em; color: #adb5bd; margin-top: 5px;">
-            v1.40.002 | Design by Gemini 3-pro
+            v1.40.003 | Design by Gemini 3-pro
         </div>
     </div>
 
     <script>
-        const APP_VERSION = "v1.40.002";
+        const APP_VERSION = "v1.40.003";
 
         const Data = {
             mainGuid: "", mainDate: "", map: {}, docsED: [], docsRSKP: [], 
@@ -184,6 +184,7 @@
             log.scrollTop = log.scrollHeight;
         };
 
+        // --- DOM Helpers ---
         function findNode(parent, tagName) {
             if (!parent) return null;
             let list = parent.getElementsByTagName(tagName);
@@ -219,6 +220,7 @@
         function genKey(num, amount) { return `${num}_${Math.abs(parseFloat(amount)).toFixed(2)}`; }
         function readFile(file) { return new Promise((r, j) => { const reader = new FileReader(); reader.onload = () => r(reader.result); reader.onerror = j; reader.readAsText(file); }); }
         
+        // --- FIXED UUID GENERATOR (No Negatives) ---
         let _guidSeq = 0;
         function uuid() {
             const now = Date.now();
@@ -253,6 +255,7 @@
             return null;
         }
 
+        // --- MATCHING ENGINE ---
         function findBestMatch(candidates, filePayerAcc, filePayeeAcc, filePurpose) {
             if (!candidates || candidates.length === 0) return null;
             const available = candidates.filter(c => !c.used);
@@ -347,6 +350,7 @@
                         const textAfter = text.substring(groupEndIndex);
                         const regexKosgu = /^\s*\(([^)]+)\)/;
                         const matchKosgu = textAfter.match(regexKosgu);
+                        
                         if (matchKosgu) {
                             const rawKosgu = matchKosgu[1].trim();
                             if (/^\d{3}$/.test(rawKosgu)) {
@@ -392,6 +396,7 @@
 
         function getTypeKBK(dirSum) { return (dirSum === "1") ? "10" : "20"; }
 
+        // --- CONVERTER V3 LOGIC ---
         function convertInterToFinal(interDoc, docsED, docsRSKP) {
             logger("🔄 Запуск конвертации промежуточной выписки...", "warn");
             const ownerAccount = interDoc.querySelector("ksNumber")?.textContent.trim() || "";
@@ -460,6 +465,11 @@
                 const iCorrBic = item.querySelector("corrBIC")?.textContent || "";
                 const iPurp = item.querySelector("purpPay")?.textContent || "";
                 
+                // --- FIX v1.40.003: Skip if amount is zero ---
+                if (Math.abs(iAmount) < 0.01) {
+                    return; // Skip this iteration (like 'continue' but inside forEach callback)
+                }
+
                 let info = null;
                 if (db[iNum] && db[iNum].length > 0) {
                     let bestCand = null;
@@ -632,6 +642,13 @@
                     const amOut = parseFloat(getVal(item, "AmountOut") || "0");
                     const amIn = parseFloat(getVal(item, "AmountIn") || "0");
                     const realSum = amOut + amIn;
+                    
+                    // --- FIX v1.40.003: Skip zero amounts ---
+                    if (realSum < 0.01) {
+                        item.remove(); // Remove from DOM (for updated statement file)
+                        return; // Skip adding to map
+                    }
+
                     let dirSum = (amOut > 0) ? "1" : "0";
                     let counterPartyAcc = (amOut > 0) ? getVal(item, "RecipAcc") : getVal(item, "SendAcc");
                     
@@ -646,7 +663,7 @@
                 });
                 Data.statementFound = true;
                 logger(`Дата выписки: ${Data.mainDate}`, "date");
-                logger(`Выписка обработана: ${count} строк`, "success");
+                logger(`Выписка обработана: ${count} строк (пустые удалены)`, "success");
             } catch (err) { logger(`Ошибка выписки: ${err.message}`, "err"); }
         }
 
@@ -830,9 +847,7 @@
                     let period = getVal(root, "DepInfo_TAX_Period"); let taxDocNo = getVal(root, "DepInfo_TAX_DocNo");
                     let taxDocDate = getVal(root, "DepInfo_TAX_DocDate");
                     
-                    // --- FIX v1.40.002: CHECK IF REVEN/STATUS EXISTS ---
-                    // Only render tax block if at least Code_Reven OR Status is present
-                    // If only OKTMO is present (which is common garbage), skip it.
+                    // FIX v1.40.002: CHECK IF REVEN/STATUS EXISTS
                     let taxBlock = "";
                     if (codeReven || status) {
                         if (!status) status = "0"; if (!basis) basis = "0"; if (!period) period = "0";
