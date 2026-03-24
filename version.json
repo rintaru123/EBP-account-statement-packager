@@ -1,6 +1,6 @@
 {
-  "version": "v1.40.003",
-  "date": "2026-03-18",
+  "version": "v1.40.004",
+  "date": "2026-03-24",
   "download_url": "https://github.com/rintaru123/EBP-account-statement-packager/releases/latest",
-  "message": "Удаление пустых финансовых документов из выписки (например, казначейских справок)"
+  "message": "Добавлен анализ КБК для назначения платежа с БО"
 }
