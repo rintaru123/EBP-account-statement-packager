@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Сборщик выписки (v1.40.004)</title>
+    <title>Сборщик выписки (v1.40.006)</title>
     <style>
         body { font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif; max-width: 950px; margin: 30px auto; background-color: #f4f6f9; color: #333; }
         .container { background: white; padding: 40px; border-radius: 16px; box-shadow: 0 10px 30px rgba(0,0,0,0.05); }
@@ -71,7 +71,7 @@
 <body>
 
     <div class="container">
-        <h1>🛠 Сборщик выписки <span style="font-size: 0.6em; color: #adb5bd; vertical-align: middle;">v1.40.004</span></h1>
+        <h1>🛠 Сборщик выписки <span style="font-size: 0.6em; color: #adb5bd; vertical-align: middle;">v1.40.006</span></h1>
         <div class="subtitle">
             Удаление пустых записей (справок), коррекция даты, конвертация.
         </div>
@@ -157,12 +157,12 @@
             | Лицензия: MIT
         </div>
         <div style="font-size: 0.85em; color: #adb5bd; margin-top: 5px;">
-            v1.40.004 | Design by Gemini 3-pro
+            v1.40.006 | Design by Gemini 3-pro
         </div>
     </div>
 
     <script>
-        const APP_VERSION = "v1.40.004";
+        const APP_VERSION = "v1.40.006";
 
         const Data = {
             mainGuid: "", mainDate: "", map: {}, docsED: [], docsRSKP: [], 
@@ -187,11 +187,48 @@
         // --- DOM Helpers ---
         function findNode(parent, tagName) {
             if (!parent) return null;
+            // First try direct getElementsByTagName (works for no-namespace docs)
             let list = parent.getElementsByTagName(tagName);
             if (list.length > 0) return list[0];
+            // Fallback: search by localName (works for namespaced docs)
             const all = parent.getElementsByTagName("*");
             for (let i = 0; i < all.length; i++) { if (all[i].localName === tagName) return all[i]; }
             return null;
+        }
+
+        // v1.40.005: Helper to detect ED type files by root name
+        function isEdRootName(rootName) {
+            return /(?:^|_)ED10[18]$/.test(rootName);
+        }
+
+        // v1.40.005: Find the actual ED element inside the document
+        function findEdElement(doc) {
+            let ed = findNode(doc, "ED101") || findNode(doc, "ED108");
+            if (ed) return ed;
+            const root = doc.documentElement;
+            if (root && isEdRootName(root.localName || root.nodeName)) return root;
+            return null;
+        }
+
+        // --- v1.40.006: Parse Sum attribute that may use dash as decimal separator ---
+        function parseEdSum(rawSumStr) {
+            if (!rawSumStr) return 0;
+            // Format "855-27" means 855 rubles 27 kopeks = 85527 in kopeks
+            // Format "85527" means 85527 kopeks (classic)
+            // Format "855.27" just in case
+            const dashMatch = rawSumStr.match(/^(\d+)-(\d{1,2})$/);
+            if (dashMatch) {
+                const rubles = parseInt(dashMatch[1], 10);
+                let kopStr = dashMatch[2];
+                if (kopStr.length === 1) kopStr = kopStr + "0"; // "5" -> "50"
+                const kopeks = parseInt(kopStr, 10);
+                return rubles * 100 + kopeks;
+            }
+            // Classic: just a number in kopeks (or with dot)
+            if (rawSumStr.includes('.')) {
+                return Math.round(parseFloat(rawSumStr) * 100);
+            }
+            return parseInt(rawSumStr, 10) || 0;
         }
 
         function getVal(parent, path) {
@@ -214,13 +251,28 @@
             } catch (e) { return ""; }
         }
 
+        // --- v1.40.006: Namespace-safe attribute getter ---
+        // Some attributes in namespaced docs need special handling
+        function getEdAttr(el, attrName) {
+            if (!el) return "";
+            // Try direct
+            let val = el.getAttribute(attrName);
+            if (val != null) return val.trim();
+            // Try case-insensitive search through attributes
+            for (let i = 0; i < el.attributes.length; i++) {
+                if (el.attributes[i].localName === attrName || el.attributes[i].name === attrName) {
+                    return el.attributes[i].value.trim();
+                }
+            }
+            return "";
+        }
+
         function getSafeKpp(val) { return (!val || val.trim() === "") ? "0" : val; }
         function makeTag(tagName, value, indent = "") { return (!value || value === "") ? "" : `${indent}<${tagName}>${value}</${tagName}>`; }
         function esc(s) { return (!s) ? "" : s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
         function genKey(num, amount) { return `${num}_${Math.abs(parseFloat(amount)).toFixed(2)}`; }
         function readFile(file) { return new Promise((r, j) => { const reader = new FileReader(); reader.onload = () => r(reader.result); reader.onerror = j; reader.readAsText(file); }); }
         
-        // --- FIXED UUID GENERATOR (No Negatives) ---
         let _guidSeq = 0;
         function uuid() {
             const now = Date.now();
@@ -345,7 +397,6 @@
                         }
                     }
 
-                    // --- V1.40.004 LOGIC: Look in the immediate NEXT parenthesis if AddClass not found inside ---
                     let currentTextAfter = text.substring(matchGroup.index + matchGroup[0].length);
 
                     if (!addClass) {
@@ -354,13 +405,11 @@
                             let potential = cleanPotentialAddClass(nextGroupMatch[1].trim());
                             if (potential && potential.length !== 20) {
                                 addClass = potential;
-                                // Advance the text pointer so KOSGU extraction skips this AddClass block
                                 currentTextAfter = currentTextAfter.substring(nextGroupMatch.index + nextGroupMatch[0].length);
                             }
                         }
                     }
 
-                    // KOSGU extraction (only for expenses)
                     if (dirSum !== "0") {
                         const regexKosgu = /^\s*\(([^)]+)\)/;
                         const matchKosgu = currentTextAfter.match(regexKosgu);
@@ -375,7 +424,6 @@
                 }
             }
 
-            // Fallback search (only triggers if AddClass is completely detached from the KBK block)
             if (!addClass) {
                 const regexAllGroups = /\(([^)]+)\)/g;
                 let m;
@@ -426,12 +474,17 @@
             for (const item of docsED) {
                 try {
                     const doc = item.xmlDoc;
-                    let ed = findNode(doc, "ED101") || findNode(doc, "ED108");
-                    const accDocNo = getAttr(ed, "AccDoc", "AccDocNo");
+                    let ed = findEdElement(doc);
+                    if (!ed) continue;
+                    const accDoc = findNode(ed, "AccDoc");
+                    const accDocNo = getEdAttr(accDoc, "AccDocNo");
                     if (accDocNo) {
-                        let guid = ed.querySelector("GUID")?.textContent || uuid(); 
-                        const payerAcc = ed.querySelector("Payer")?.getAttribute("PersonalAcc");
-                        const payeeAcc = ed.querySelector("Payee")?.getAttribute("PersonalAcc");
+                        const guidNode = findNode(ed, "GUID");
+                        let guid = guidNode ? guidNode.textContent.trim() : uuid();
+                        const payerNode = findNode(ed, "Payer");
+                        const payeeNode = findNode(ed, "Payee");
+                        const payerAcc = getEdAttr(payerNode, "PersonalAcc");
+                        const payeeAcc = getEdAttr(payeeNode, "PersonalAcc");
                         const purp = getVal(ed, "Purpose");
                         addToDb(accDocNo, { guid, payerAcc, payeeAcc, purpose: purp });
                     }
@@ -480,9 +533,8 @@
                 const iCorrBic = item.querySelector("corrBIC")?.textContent || "";
                 const iPurp = item.querySelector("purpPay")?.textContent || "";
                 
-                // --- FIX v1.40.003: Skip if amount is zero ---
                 if (Math.abs(iAmount) < 0.01) {
-                    return; // Skip this iteration (like 'continue' but inside forEach callback)
+                    return;
                 }
 
                 let info = null;
@@ -587,7 +639,8 @@
                     const text = await readFile(file);
                     const doc = parser.parseFromString(text, "text/xml");
                     if (doc.querySelector("parsererror")) { logger(`Ошибка XML: ${file.name}`, "err"); continue; }
-                    const rootName = doc.documentElement.nodeName;
+                    const root = doc.documentElement;
+                    const rootName = root.localName || root.nodeName;
 
                     if (doc.querySelector("StmInfrmtn") || doc.querySelector("StmInfrmtn_TF") || rootName.includes("Statement")) {
                         processStatement(doc, file.name);
@@ -597,7 +650,7 @@
                         Data.interName = file.name;
                         const orgName = getVal(doc, "ttlPrtNameOrg");
                         if(orgName) document.getElementById('hintOrgName').textContent = "Из файла: " + orgName;
-                    } else if (rootName === "ED101" || rootName === "ED108") {
+                    } else if (isEdRootName(rootName)) {
                         Data.docsED.push({ name: file.name, xmlDoc: doc });
                     } else if (rootName.includes("MSC_TransfOrderAcc")) {
                         Data.docsRSKP.push({ name: file.name, xmlDoc: doc });
@@ -658,10 +711,9 @@
                     const amIn = parseFloat(getVal(item, "AmountIn") || "0");
                     const realSum = amOut + amIn;
                     
-                    // --- FIX v1.40.003: Skip zero amounts ---
                     if (realSum < 0.01) {
-                        item.remove(); // Remove from DOM (for updated statement file)
-                        return; // Skip adding to map
+                        item.remove();
+                        return;
                     }
 
                     let dirSum = (amOut > 0) ? "1" : "0";
@@ -734,17 +786,31 @@
             for (const item of Data.docsED) {
                 try {
                     const doc = item.xmlDoc;
-                    let ed = findNode(doc, "ED101") || findNode(doc, "ED108");
-                    let fileGuid = ed.getAttribute("GUID");
-                    const docNo = getAttr(ed, "AccDoc", "AccDocNo");
-                    const rawSum = parseFloat(ed.getAttribute("Sum") || "0");
-                    const sumRub = rawSum / 100;
+                    let ed = findEdElement(doc);
+                    if (!ed) { logger(`Пропуск ${item.name}: не найден ED элемент`, "warn"); continue; }
+                    
+                    // v1.40.006: use getEdAttr for namespace-safe attribute access
+                    let fileGuid = getEdAttr(ed, "GUID");
+                    
+                    const accDoc = findNode(ed, "AccDoc");
+                    const docNo = getEdAttr(accDoc, "AccDocNo");
+                    const docDate = getEdAttr(accDoc, "AccDocDate");
+                    
+                    // v1.40.006: use parseEdSum for dash-format sums like "855-27"
+                    const rawSumStr = getEdAttr(ed, "Sum");
+                    const sumKopeks = parseEdSum(rawSumStr);
+                    const sumRub = sumKopeks / 100;
+                    
                     const key = genKey(docNo, sumRub);
                     const candidates = Data.map[key];
 
-                    if (!candidates) { logger(`Пропуск ED №${docNo}: нет в выписке`, "warn"); continue; }
-                    const p = findNode(ed, "Payer"); const r = findNode(ed, "Payee");
-                    const filePayerAcc = p?.getAttribute("PersonalAcc"); const filePayeeAcc = r?.getAttribute("PersonalAcc");
+                    if (!candidates) { logger(`Пропуск ED №${docNo} (${sumRub.toFixed(2)}₽): нет в выписке`, "warn"); continue; }
+                    
+                    // v1.40.006: use findNode + getEdAttr for namespace-safe access
+                    const p = findNode(ed, "Payer"); 
+                    const r = findNode(ed, "Payee");
+                    const filePayerAcc = getEdAttr(p, "PersonalAcc"); 
+                    const filePayeeAcc = getEdAttr(r, "PersonalAcc");
                     
                     const purp = getVal(ed, "Purpose"); 
                     const info = findBestMatch(candidates, filePayerAcc, filePayeeAcc, purp);
@@ -753,8 +819,6 @@
 
                     let finalGuid = fileGuid || info.originalGuid;
                     if (fileGuid) updateStatementGuid(info.node, finalGuid);
-
-                    const docDate = getAttr(ed, "AccDoc", "AccDocDate");
                     
                     let foundKbk = null; if (optKbk) foundKbk = findKbkComplex(purp, info.dirSum);
                     let kbkBlock = ""; let addClassTag = "";
@@ -769,7 +833,10 @@
                             addClassTag = makeTag("ADD_KLASS", addKlassVal);
                         }
                     }
-                    const pBank = findNode(p, "Bank"); const rBank = findNode(r, "Bank");
+                    
+                    const pBank = findNode(p, "Bank"); 
+                    const rBank = findNode(r, "Bank");
+                    
                     resultPD += `
         <Inf_PD_ITEM>
             <Nom_PP>${docNo}</Nom_PP>
@@ -780,24 +847,24 @@
             <Date_PP_OUT>${docDate}</Date_PP_OUT>
             <VID_Oper>${info.operType}</VID_Oper>
             <Inf_PAY>
-                <INN_PAY>${p?.getAttribute("INN")||""}</INN_PAY>
-                <KPP_PAY>${getSafeKpp(p?.getAttribute("KPP"))}</KPP_PAY>
+                <INN_PAY>${getEdAttr(p, "INN")}</INN_PAY>
+                <KPP_PAY>${getSafeKpp(getEdAttr(p, "KPP"))}</KPP_PAY>
                 <CName_PAY>${esc(getVal(p, "Name"))}</CName_PAY>
             </Inf_PAY>
             <Bank_PAY>
-                <BS_PAY>${filePayerAcc||""}</BS_PAY>
-                <BIC_PAY>${pBank?.getAttribute("BIC")||""}</BIC_PAY>
-                <BS_KS_PAY>${pBank?.getAttribute("CorrespAcc")||""}</BS_KS_PAY>
+                <BS_PAY>${filePayerAcc}</BS_PAY>
+                <BIC_PAY>${getEdAttr(pBank, "BIC")}</BIC_PAY>
+                <BS_KS_PAY>${getEdAttr(pBank, "CorrespAcc")}</BS_KS_PAY>
             </Bank_PAY>
             <Inf_RCP>
-                <INN_PAY>${r?.getAttribute("INN")||""}</INN_PAY>
-                <KPP_PAY>${getSafeKpp(r?.getAttribute("KPP"))}</KPP_PAY>
+                <INN_PAY>${getEdAttr(r, "INN")}</INN_PAY>
+                <KPP_PAY>${getSafeKpp(getEdAttr(r, "KPP"))}</KPP_PAY>
                 <CName_PAY>${esc(getVal(r, "Name"))}</CName_PAY>
             </Inf_RCP>
             <Bank_RCP>
-                <BS_PAY>${filePayeeAcc||""}</BS_PAY>
-                <BIC_PAY>${rBank?.getAttribute("BIC")||""}</BIC_PAY>
-                <BS_KS_PAY>${rBank?.getAttribute("CorrespAcc")||""}</BS_KS_PAY>
+                <BS_PAY>${filePayeeAcc}</BS_PAY>
+                <BIC_PAY>${getEdAttr(rBank, "BIC")}</BIC_PAY>
+                <BS_KS_PAY>${getEdAttr(rBank, "CorrespAcc")}</BS_KS_PAY>
             </Bank_RCP>
             <Order_PAY>5</Order_PAY>
             <Purpose>${esc(purp)}</Purpose>
@@ -862,7 +929,6 @@
                     let period = getVal(root, "DepInfo_TAX_Period"); let taxDocNo = getVal(root, "DepInfo_TAX_DocNo");
                     let taxDocDate = getVal(root, "DepInfo_TAX_DocDate");
                     
-                    // FIX v1.40.002: CHECK IF REVEN/STATUS EXISTS
                     let taxBlock = "";
                     if (codeReven || status) {
                         if (!status) status = "0"; if (!basis) basis = "0"; if (!period) period = "0";
