@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Сборщик выписки (v1.40.006)</title>
+    <title>Сборщик выписки (v1.40.008)</title>
     <style>
         body { font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif; max-width: 950px; margin: 30px auto; background-color: #f4f6f9; color: #333; }
         .container { background: white; padding: 40px; border-radius: 16px; box-shadow: 0 10px 30px rgba(0,0,0,0.05); }
@@ -71,9 +71,9 @@
 <body>
 
     <div class="container">
-        <h1>🛠 Сборщик выписки <span style="font-size: 0.6em; color: #adb5bd; vertical-align: middle;">v1.40.006</span></h1>
+        <h1>🛠 Сборщик выписки <span style="font-size: 0.6em; color: #adb5bd; vertical-align: middle;">v1.40.008</span></h1>
         <div class="subtitle">
-            Удаление пустых записей (справок), коррекция даты, конвертация.
+            Улучшен анализ и поиск допклассификаций
         </div>
         
         <input type="file" id="fileInput" multiple accept=".xml">
@@ -157,12 +157,12 @@
             | Лицензия: MIT
         </div>
         <div style="font-size: 0.85em; color: #adb5bd; margin-top: 5px;">
-            v1.40.006 | Design by Gemini 3-pro
+            v1.40.008 | Design by Gemini 3-pro
         </div>
     </div>
 
     <script>
-        const APP_VERSION = "v1.40.006";
+        const APP_VERSION = "v1.40.008";
 
         const Data = {
             mainGuid: "", mainDate: "", map: {}, docsED: [], docsRSKP: [], 
@@ -187,21 +187,17 @@
         // --- DOM Helpers ---
         function findNode(parent, tagName) {
             if (!parent) return null;
-            // First try direct getElementsByTagName (works for no-namespace docs)
             let list = parent.getElementsByTagName(tagName);
             if (list.length > 0) return list[0];
-            // Fallback: search by localName (works for namespaced docs)
             const all = parent.getElementsByTagName("*");
             for (let i = 0; i < all.length; i++) { if (all[i].localName === tagName) return all[i]; }
             return null;
         }
 
-        // v1.40.005: Helper to detect ED type files by root name
         function isEdRootName(rootName) {
             return /(?:^|_)ED10[18]$/.test(rootName);
         }
 
-        // v1.40.005: Find the actual ED element inside the document
         function findEdElement(doc) {
             let ed = findNode(doc, "ED101") || findNode(doc, "ED108");
             if (ed) return ed;
@@ -210,21 +206,16 @@
             return null;
         }
 
-        // --- v1.40.006: Parse Sum attribute that may use dash as decimal separator ---
         function parseEdSum(rawSumStr) {
             if (!rawSumStr) return 0;
-            // Format "855-27" means 855 rubles 27 kopeks = 85527 in kopeks
-            // Format "85527" means 85527 kopeks (classic)
-            // Format "855.27" just in case
             const dashMatch = rawSumStr.match(/^(\d+)-(\d{1,2})$/);
             if (dashMatch) {
                 const rubles = parseInt(dashMatch[1], 10);
                 let kopStr = dashMatch[2];
-                if (kopStr.length === 1) kopStr = kopStr + "0"; // "5" -> "50"
+                if (kopStr.length === 1) kopStr = kopStr + "0";
                 const kopeks = parseInt(kopStr, 10);
                 return rubles * 100 + kopeks;
             }
-            // Classic: just a number in kopeks (or with dot)
             if (rawSumStr.includes('.')) {
                 return Math.round(parseFloat(rawSumStr) * 100);
             }
@@ -251,14 +242,10 @@
             } catch (e) { return ""; }
         }
 
-        // --- v1.40.006: Namespace-safe attribute getter ---
-        // Some attributes in namespaced docs need special handling
         function getEdAttr(el, attrName) {
             if (!el) return "";
-            // Try direct
             let val = el.getAttribute(attrName);
             if (val != null) return val.trim();
-            // Try case-insensitive search through attributes
             for (let i = 0; i < el.attributes.length; i++) {
                 if (el.attributes[i].localName === attrName || el.attributes[i].name === attrName) {
                     return el.attributes[i].value.trim();
@@ -337,33 +324,65 @@
         }
 
         function isIncomeKbk(kbk) {
-            if (!kbk || kbk.length !== 20) return false;
-            const incomeEndings = ["120", "130", "140", "150", "180"];
+            if (!/^\d{20}$/.test(kbk || "")) return false;
+            if (/^0+$/.test(kbk)) return false;
+            const incomeEndings = ["110", "120", "130", "140", "150", "160", "170", "180"];
             if (incomeEndings.some(end => kbk.endsWith(end))) return true;
-            if (kbk.startsWith("1") || kbk.startsWith("000")) return true;
+            if (kbk.startsWith("1")) return true;
             return false;
         }
 
+        // --- v1.40.008: Also split by spaces inside parentheses ---
         function findKbkComplex(text, dirSum) {
             if (!text) return null;
-            const regex = /\(([^)]+)\)/g;
+
+            const candidates = [];
+            const addCandidate = (raw) => {
+                const clean = (raw || "").trim();
+                if (/^\d{20}$/.test(clean) && !candidates.includes(clean)) {
+                    candidates.push(clean);
+                }
+            };
+
+            // 1. Inside parentheses — split by ; , and SPACE
+            const regexGroups = /\(([^)]+)\)/g;
             let match;
-            let candidates = [];
-            while ((match = regex.exec(text)) !== null) {
-                const parts = match[1].split(/[;,]/);
-                parts.forEach(part => {
-                    const clean = part.replace(/[^a-zA-Zа-яА-ЯёЁ0-9]/g, '');
-                    if (clean.length === 20) candidates.push(clean);
-                });
+            while ((match = regexGroups.exec(text)) !== null) {
+                const parts = match[1].split(/[;,\s]+/);
+                parts.forEach(part => addCandidate(part));
             }
+
+            // 2. Free text: standalone 20-digit sequences
+            const regexPlain = /(?:^|[^0-9\)])(\d{20})(?![0-9])/g;
+            while ((match = regexPlain.exec(text)) !== null) {
+                addCandidate(match[1]);
+            }
+
             if (candidates.length === 0) return null;
-            if (dirSum === "1") { 
+
+            if (dirSum === "1") {
                 const expenseKbk = candidates.find(c => c.startsWith("9"));
-                return expenseKbk || null; 
+                return expenseKbk || null;
             } else {
-                const priorityKbk = candidates.find(c => isIncomeKbk(c));
-                return priorityKbk || null;
+                const incomeKbk = candidates.find(c => isIncomeKbk(c));
+                return incomeKbk || null;
             }
+        }
+
+        // --- v1.40.008: Validation for AddClass values ---
+        function isValidAddClass(val) {
+            if (!val) return false;
+            // Must not contain spaces
+            if (/\s/.test(val)) return false;
+            // Must be <= 20 characters (per TFF spec)
+            if (val.length > 20) return false;
+            // Must be > 3 characters
+            if (val.length <= 3) return false;
+            // Must start with 9 or 0
+            if (!val.startsWith('9') && !val.startsWith('0')) return false;
+            // Must not be 20 pure digits (that's a KBK, not AddClass)
+            if (/^\d{20}$/.test(val)) return false;
+            return true;
         }
 
         function getAddClassAndKosgu(text, kbk, dirSum) {
@@ -374,20 +393,28 @@
             const cleanPotentialAddClass = (raw) => {
                 if (!raw) return "";
                 let cleaned = raw.split('=')[0].trim();
-                if (cleaned.length > 3 && (cleaned.startsWith('9') || cleaned.startsWith('0'))) {
-                    return cleaned;
-                }
+                if (isValidAddClass(cleaned)) return cleaned;
                 return "";
             };
 
             if (kbk) {
                 const escKbk = kbk.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
-                const regexGroup = new RegExp(`\\(${escKbk}(.*?)\\)`, "i");
-                const matchGroup = text.match(regexGroup);
 
-                if (matchGroup) {
-                    const innerContent = matchGroup[1]; 
-                    const parts = innerContent.split(/[;,]/);
+                // Strategy A: KBK is inside parentheses
+                const regexGroupContaining = new RegExp(`\\([^)]*${escKbk}([^)]*)\\)`, "i");
+                const matchGroupContaining = text.match(regexGroupContaining);
+
+                // Strategy B: KBK is in free text
+                const regexFreeKbk = new RegExp(`(?:^|[^(])${escKbk}`, "i");
+                const matchFreeKbk = text.match(regexFreeKbk);
+
+                let currentTextAfter = "";
+
+                if (matchGroupContaining) {
+                    // KBK found inside parentheses
+                    const innerAfterKbk = matchGroupContaining[1];
+                    // v1.40.008: split by ; , and space
+                    const parts = innerAfterKbk.split(/[;,\s]+/);
                     
                     for (let part of parts) {
                         let potential = cleanPotentialAddClass(part.trim());
@@ -397,42 +424,60 @@
                         }
                     }
 
-                    let currentTextAfter = text.substring(matchGroup.index + matchGroup[0].length);
+                    currentTextAfter = text.substring(matchGroupContaining.index + matchGroupContaining[0].length);
 
+                    // If not found inside the same group, look in the next group
                     if (!addClass) {
                         const nextGroupMatch = currentTextAfter.match(/^\s*\(([^)]+)\)/);
                         if (nextGroupMatch) {
                             let potential = cleanPotentialAddClass(nextGroupMatch[1].trim());
-                            if (potential && potential.length !== 20) {
+                            if (potential) {
                                 addClass = potential;
                                 currentTextAfter = currentTextAfter.substring(nextGroupMatch.index + nextGroupMatch[0].length);
                             }
                         }
                     }
+                } else if (matchFreeKbk) {
+                    // KBK found in free text
+                    const kbkEndIndex = matchFreeKbk.index + matchFreeKbk[0].length;
+                    currentTextAfter = text.substring(kbkEndIndex);
 
-                    if (dirSum !== "0") {
-                        const regexKosgu = /^\s*\(([^)]+)\)/;
-                        const matchKosgu = currentTextAfter.match(regexKosgu);
-                        
-                        if (matchKosgu) {
-                            const rawKosgu = matchKosgu[1].trim();
-                            if (/^\d{3}$/.test(rawKosgu)) {
-                                kosgu = rawKosgu;
-                            }
-                        } 
+                    const nextGroupMatch = currentTextAfter.match(/^\s*\(([^)]+)\)/);
+                    if (nextGroupMatch) {
+                        let potential = cleanPotentialAddClass(nextGroupMatch[1].trim());
+                        if (potential) {
+                            addClass = potential;
+                            currentTextAfter = currentTextAfter.substring(nextGroupMatch.index + nextGroupMatch[0].length);
+                        }
                     }
+                }
+
+                // KOSGU extraction (only for expenses)
+                if (dirSum !== "0" && currentTextAfter) {
+                    const regexKosgu = /^\s*\(([^)]+)\)/;
+                    const matchKosgu = currentTextAfter.match(regexKosgu);
+                    
+                    if (matchKosgu) {
+                        const rawKosgu = matchKosgu[1].trim();
+                        if (/^\d{3}$/.test(rawKosgu)) {
+                            kosgu = rawKosgu;
+                        }
+                    } 
                 }
             }
 
+            // Fallback search
             if (!addClass) {
                 const regexAllGroups = /\(([^)]+)\)/g;
                 let m;
                 while ((m = regexAllGroups.exec(text)) !== null) {
                     const content = m[1].trim();
-                    const parts = content.split(/[;,]/);
+                    if (kbk && content.includes(kbk)) continue;
+                    // v1.40.008: split by ; , and space in fallback too
+                    const parts = content.split(/[;,\s]+/);
                     for (let part of parts) {
                         let potential = cleanPotentialAddClass(part.trim());
-                        if (potential && potential.length !== 20) {
+                        if (potential) {
                             addClass = potential;
                             break;
                         }
@@ -445,6 +490,10 @@
                 const garbageMatch = addClass.match(/(л\/с|лс|№|лиц\/сч)/i);
                 if (garbageMatch) {
                     addClass = addClass.substring(0, garbageMatch.index).trim();
+                }
+                // v1.40.008: Final validation after garbage cleanup
+                if (!isValidAddClass(addClass)) {
+                    addClass = "";
                 }
             }
 
@@ -789,14 +838,12 @@
                     let ed = findEdElement(doc);
                     if (!ed) { logger(`Пропуск ${item.name}: не найден ED элемент`, "warn"); continue; }
                     
-                    // v1.40.006: use getEdAttr for namespace-safe attribute access
                     let fileGuid = getEdAttr(ed, "GUID");
                     
                     const accDoc = findNode(ed, "AccDoc");
                     const docNo = getEdAttr(accDoc, "AccDocNo");
                     const docDate = getEdAttr(accDoc, "AccDocDate");
                     
-                    // v1.40.006: use parseEdSum for dash-format sums like "855-27"
                     const rawSumStr = getEdAttr(ed, "Sum");
                     const sumKopeks = parseEdSum(rawSumStr);
                     const sumRub = sumKopeks / 100;
@@ -806,7 +853,6 @@
 
                     if (!candidates) { logger(`Пропуск ED №${docNo} (${sumRub.toFixed(2)}₽): нет в выписке`, "warn"); continue; }
                     
-                    // v1.40.006: use findNode + getEdAttr for namespace-safe access
                     const p = findNode(ed, "Payer"); 
                     const r = findNode(ed, "Payee");
                     const filePayerAcc = getEdAttr(p, "PersonalAcc"); 
