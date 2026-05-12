@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Сборщик выписки (v1.40.008)</title>
+    <title>Сборщик выписки (v1.40.009)</title>
     <style>
         body { font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif; max-width: 950px; margin: 30px auto; background-color: #f4f6f9; color: #333; }
         .container { background: white; padding: 40px; border-radius: 16px; box-shadow: 0 10px 30px rgba(0,0,0,0.05); }
@@ -71,9 +71,9 @@
 <body>
 
     <div class="container">
-        <h1>🛠 Сборщик выписки <span style="font-size: 0.6em; color: #adb5bd; vertical-align: middle;">v1.40.008</span></h1>
+        <h1>🛠 Сборщик выписки <span style="font-size: 0.6em; color: #adb5bd; vertical-align: middle;">v1.40.009</span></h1>
         <div class="subtitle">
-            Улучшен анализ и поиск допклассификаций
+            Удаление пустых записей (справок), коррекция даты, конвертация.
         </div>
         
         <input type="file" id="fileInput" multiple accept=".xml">
@@ -157,12 +157,12 @@
             | Лицензия: MIT
         </div>
         <div style="font-size: 0.85em; color: #adb5bd; margin-top: 5px;">
-            v1.40.008 | Design by Gemini 3-pro
+            v1.40.009 | Design by Gemini 3-pro
         </div>
     </div>
 
     <script>
-        const APP_VERSION = "v1.40.008";
+        const APP_VERSION = "v1.40.009";
 
         const Data = {
             mainGuid: "", mainDate: "", map: {}, docsED: [], docsRSKP: [], 
@@ -332,19 +332,33 @@
             return false;
         }
 
-        // --- v1.40.008: Also split by spaces inside parentheses ---
+        // --- v1.40.009: Check if a string looks like a 20-char KBK code ---
+        // Income KBK: 20 digits only
+        // Expense KBK: 20 alphanumeric chars starting with 9
+        function isPossibleKbk(val) {
+            if (!val || val.length !== 20) return false;
+            // Pure 20-digit code (income or expense)
+            if (/^\d{20}$/.test(val)) return true;
+            // Alphanumeric 20-char code starting with 9 (expense KBK with letters)
+            if (val.startsWith("9") && /^[a-zA-Zа-яА-ЯёЁ0-9]{20}$/.test(val)) return true;
+            return false;
+        }
+
         function findKbkComplex(text, dirSum) {
             if (!text) return null;
 
             const candidates = [];
             const addCandidate = (raw) => {
                 const clean = (raw || "").trim();
-                if (/^\d{20}$/.test(clean) && !candidates.includes(clean)) {
+                if (!clean || clean.length !== 20) return;
+                if (candidates.includes(clean)) return;
+                // v1.40.009: use isPossibleKbk for universal check
+                if (isPossibleKbk(clean)) {
                     candidates.push(clean);
                 }
             };
 
-            // 1. Inside parentheses — split by ; , and SPACE
+            // 1. Inside parentheses — split by ; , and space
             const regexGroups = /\(([^)]+)\)/g;
             let match;
             while ((match = regexGroups.exec(text)) !== null) {
@@ -352,7 +366,7 @@
                 parts.forEach(part => addCandidate(part));
             }
 
-            // 2. Free text: standalone 20-digit sequences
+            // 2. Free text: standalone 20-digit sequences (income only — expense with letters won't be free-floating)
             const regexPlain = /(?:^|[^0-9\)])(\d{20})(?![0-9])/g;
             while ((match = regexPlain.exec(text)) !== null) {
                 addCandidate(match[1]);
@@ -361,27 +375,25 @@
             if (candidates.length === 0) return null;
 
             if (dirSum === "1") {
+                // Expense: prefer KBK starting with 9
                 const expenseKbk = candidates.find(c => c.startsWith("9"));
                 return expenseKbk || null;
             } else {
+                // Income: prefer valid income KBK (pure digits)
                 const incomeKbk = candidates.find(c => isIncomeKbk(c));
                 return incomeKbk || null;
             }
         }
 
-        // --- v1.40.008: Validation for AddClass values ---
+        // --- v1.40.009: Updated validation — reject anything that looks like a KBK ---
         function isValidAddClass(val) {
             if (!val) return false;
-            // Must not contain spaces
             if (/\s/.test(val)) return false;
-            // Must be <= 20 characters (per TFF spec)
             if (val.length > 20) return false;
-            // Must be > 3 characters
             if (val.length <= 3) return false;
-            // Must start with 9 or 0
             if (!val.startsWith('9') && !val.startsWith('0')) return false;
-            // Must not be 20 pure digits (that's a KBK, not AddClass)
-            if (/^\d{20}$/.test(val)) return false;
+            // Reject if it looks like a KBK (20-char code that could be a KBK)
+            if (isPossibleKbk(val)) return false;
             return true;
         }
 
@@ -411,9 +423,7 @@
                 let currentTextAfter = "";
 
                 if (matchGroupContaining) {
-                    // KBK found inside parentheses
                     const innerAfterKbk = matchGroupContaining[1];
-                    // v1.40.008: split by ; , and space
                     const parts = innerAfterKbk.split(/[;,\s]+/);
                     
                     for (let part of parts) {
@@ -426,7 +436,6 @@
 
                     currentTextAfter = text.substring(matchGroupContaining.index + matchGroupContaining[0].length);
 
-                    // If not found inside the same group, look in the next group
                     if (!addClass) {
                         const nextGroupMatch = currentTextAfter.match(/^\s*\(([^)]+)\)/);
                         if (nextGroupMatch) {
@@ -438,7 +447,6 @@
                         }
                     }
                 } else if (matchFreeKbk) {
-                    // KBK found in free text
                     const kbkEndIndex = matchFreeKbk.index + matchFreeKbk[0].length;
                     currentTextAfter = text.substring(kbkEndIndex);
 
@@ -473,7 +481,6 @@
                 while ((m = regexAllGroups.exec(text)) !== null) {
                     const content = m[1].trim();
                     if (kbk && content.includes(kbk)) continue;
-                    // v1.40.008: split by ; , and space in fallback too
                     const parts = content.split(/[;,\s]+/);
                     for (let part of parts) {
                         let potential = cleanPotentialAddClass(part.trim());
@@ -491,7 +498,6 @@
                 if (garbageMatch) {
                     addClass = addClass.substring(0, garbageMatch.index).trim();
                 }
-                // v1.40.008: Final validation after garbage cleanup
                 if (!isValidAddClass(addClass)) {
                     addClass = "";
                 }
