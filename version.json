@@ -1,6 +1,6 @@
 {
-  "version": "v1.40.009",
-  "date": "2026-05-12",
+  "version": "v1.40.010",
+  "date": "2026-05-14",
   "download_url": "https://github.com/rintaru123/EBP-account-statement-packager/releases/latest",
-  "message": "Исправлен анализ КБК по расходам"
+  "message": "Исправлены ошибки при анализе КБК"
 }
