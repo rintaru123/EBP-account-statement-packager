@@ -1,6 +1,6 @@
 {
-  "version": "v1.40.010",
-  "date": "2026-05-14",
+  "version": "v1.41.010",
+  "date": "2026-11-02",
   "download_url": "https://github.com/rintaru123/EBP-account-statement-packager/releases/latest",
-  "message": "Исправлены ошибки при анализе КБК"
+  "message": "Добавлена поддержка платежных ордеров (ED105), добавлена проверка на дублирующиеся идентификаторы"
 }

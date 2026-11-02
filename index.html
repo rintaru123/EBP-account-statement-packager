@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Сборщик выписки (v1.40.010)</title>
+    <title>Сборщик выписки (v1.41.010)</title>
     <style>
         body { font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif; max-width: 950px; margin: 30px auto; background-color: #f4f6f9; color: #333; }
         .container { background: white; padding: 40px; border-radius: 16px; box-shadow: 0 10px 30px rgba(0,0,0,0.05); }
@@ -71,10 +71,10 @@
 <body>
 
     <div class="container">
-        <h1>🛠 Сборщик выписки <span style="font-size: 0.6em; color: #adb5bd; vertical-align: middle;">v1.40.010</span></h1>
+        <h1>🛠 Сборщик выписки <span style="font-size: 0.6em; color: #adb5bd; vertical-align: middle;">v1.41.010</span></h1>
         <div class="subtitle">
             Очистка пустых записей, коррекция даты, конвертация промежуточных выписок,<br>
-            поиск КБК и доп. классификации в назначениях платежа, поддержка IN_ED101/108.
+            поиск КБК и доп. классификации в назначениях платежа, поддержка ED101/105/108 (и IN_ED*), сопоставление по EDNo.
         </div>
         
         <input type="file" id="fileInput" multiple accept=".xml">
@@ -158,12 +158,12 @@
             | Лицензия: MIT
         </div>
         <div style="font-size: 0.85em; color: #adb5bd; margin-top: 5px;">
-            v1.40.010 | Design by Gemini 3-pro
+            v1.41.010 | Design by Gemini 3-pro
         </div>
     </div>
 
     <script>
-        const APP_VERSION = "v1.40.010";
+        const APP_VERSION = "v1.41.010";
 
         const Data = {
             mainGuid: "", mainDate: "", map: {}, docsED: [], docsRSKP: [], 
@@ -194,15 +194,23 @@
             return null;
         }
 
+        // v1.41.010: расширено для ED105 и любых ED1xx (ED101, ED105, ED108, IN_ED101/105/108)
         function isEdRootName(rootName) {
-            return /(?:^|_)ED10[18]$/.test(rootName);
+            return /(?:^|_)ED1\d{2}$/.test(rootName);
         }
 
+        // v1.41.010: добавлен поиск ED105 и общий fallback по regex
         function findEdElement(doc) {
-            let ed = findNode(doc, "ED101") || findNode(doc, "ED108");
+            let ed = findNode(doc, "ED101") || findNode(doc, "ED105") || findNode(doc, "ED108");
             if (ed) return ed;
             const root = doc.documentElement;
             if (root && isEdRootName(root.localName || root.nodeName)) return root;
+            // Fallback: ищем любой ED1xx элемент внутри документа
+            const all = doc.getElementsByTagName("*");
+            for (let i = 0; i < all.length; i++) {
+                const ln = all[i].localName || all[i].nodeName;
+                if (isEdRootName(ln)) return all[i];
+            }
             return null;
         }
 
@@ -294,10 +302,22 @@
             return null;
         }
 
-        function findBestMatch(candidates, filePayerAcc, filePayeeAcc, filePurpose) {
+        // v1.41.010: добавлен параметр fileEdNo — приоритетное сопоставление по EDNo
+        function findBestMatch(candidates, filePayerAcc, filePayeeAcc, filePurpose, fileEdNo) {
             if (!candidates || candidates.length === 0) return null;
             const available = candidates.filter(c => !c.used);
             if (available.length === 0) return null;
+
+            // --- Приоритет 1: точное совпадение по EDNo (если есть у ED-файла и у строки выписки) ---
+            if (fileEdNo) {
+                const edMatch = available.find(c => c.edNo && c.edNo === fileEdNo);
+                if (edMatch) {
+                    edMatch.used = true;
+                    return edMatch;
+                }
+            }
+
+            // --- Приоритет 2: scoring по счетам/назначению (как раньше) ---
             let bestCandidate = null;
             let maxScore = -1;
             const fPayer = (filePayerAcc || "").trim();
@@ -373,10 +393,8 @@
             return true;
         }
 
-        // --- v1.40.010: Extract labeled add-class like "(доп классиф:957200)" or "(ДОП КЛАССИФ:957200)" ---
         function extractLabeledAddClass(text) {
             if (!text) return "";
-            // Match patterns like (доп классиф:VALUE) or (доп.классиф:VALUE) case-insensitive
             const regex = /\(\s*доп[\s.]*класс(?:иф)?[:\s]+([^)]+)\)/gi;
             const match = regex.exec(text);
             if (match) {
@@ -393,11 +411,9 @@
             let addClass = "";
             let kosgu = "";
 
-            // --- v1.40.010: PRIORITY 1 — Check for explicitly labeled add-class ---
             const labeledAddClass = extractLabeledAddClass(text);
             if (labeledAddClass) {
                 addClass = labeledAddClass;
-                // For expenses, still try to find KOSGU after the labeled group
                 if (dirSum !== "0") {
                     const labelRegex = /\(\s*доп[\s.]*класс(?:иф)?[:\s]+[^)]+\)/gi;
                     const labelMatch = labelRegex.exec(text);
@@ -407,13 +423,11 @@
                         if (kosguMatch) kosgu = kosguMatch[1];
                     }
                 }
-                // Return result with labeled value
                 if (dirSum === "0") return addClass;
                 if (addClass && kosgu) return `${addClass}(${kosgu})`;
                 if (addClass) return addClass;
             }
 
-            // --- PRIORITY 2 — Positional search near KBK ---
             const cleanPotentialAddClass = (raw) => {
                 if (!raw) return "";
                 let cleaned = raw.split('=')[0].trim();
@@ -423,12 +437,8 @@
 
             if (kbk) {
                 const escKbk = kbk.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
-
-                // Strategy A: KBK is inside parentheses
                 const regexGroupContaining = new RegExp(`\\([^)]*${escKbk}([^)]*)\\)`, "i");
                 const matchGroupContaining = text.match(regexGroupContaining);
-
-                // Strategy B: KBK is in free text
                 const regexFreeKbk = new RegExp(`(?:^|[^(])${escKbk}`, "i");
                 const matchFreeKbk = text.match(regexFreeKbk);
 
@@ -437,17 +447,11 @@
                 if (matchGroupContaining) {
                     const innerAfterKbk = matchGroupContaining[1];
                     const parts = innerAfterKbk.split(/[;,\s]+/);
-                    
                     for (let part of parts) {
                         let potential = cleanPotentialAddClass(part.trim());
-                        if (potential) {
-                            addClass = potential;
-                            break; 
-                        }
+                        if (potential) { addClass = potential; break; }
                     }
-
                     currentTextAfter = text.substring(matchGroupContaining.index + matchGroupContaining[0].length);
-
                     if (!addClass) {
                         const nextGroupMatch = currentTextAfter.match(/^\s*\(([^)]+)\)/);
                         if (nextGroupMatch) {
@@ -461,10 +465,8 @@
                 } else if (matchFreeKbk) {
                     const kbkEndIndex = matchFreeKbk.index + matchFreeKbk[0].length;
                     currentTextAfter = text.substring(kbkEndIndex);
-
                     const nextGroupMatch = currentTextAfter.match(/^\s*\(([^)]+)\)/);
                     if (nextGroupMatch) {
-                        // v1.40.010: Check if the next group is a labeled add-class that we already handled
                         const groupContent = nextGroupMatch[1].trim();
                         if (!/доп[\s.]*класс/i.test(groupContent)) {
                             let potential = cleanPotentialAddClass(groupContent);
@@ -476,21 +478,16 @@
                     }
                 }
 
-                // KOSGU extraction (only for expenses)
                 if (dirSum !== "0" && currentTextAfter) {
                     const regexKosgu = /^\s*\(([^)]+)\)/;
                     const matchKosgu = currentTextAfter.match(regexKosgu);
                     if (matchKosgu) {
                         const rawKosgu = matchKosgu[1].trim();
-                        if (/^\d{3}$/.test(rawKosgu)) {
-                            kosgu = rawKosgu;
-                        }
+                        if (/^\d{3}$/.test(rawKosgu)) { kosgu = rawKosgu; }
                     } 
                 }
             }
 
-            // --- v1.40.010: Fallback search ONLY for expenses (dirSum === "1") ---
-            // For income (dirSum === "0"), do NOT fallback — too risky to grab random numbers
             if (!addClass && dirSum === "1") {
                 const regexAllGroups = /\(([^)]+)\)/g;
                 let m;
@@ -501,10 +498,7 @@
                     const parts = content.split(/[;,\s]+/);
                     for (let part of parts) {
                         let potential = cleanPotentialAddClass(part.trim());
-                        if (potential) {
-                            addClass = potential;
-                            break;
-                        }
+                        if (potential) { addClass = potential; break; }
                     }
                     if (addClass) break;
                 }
@@ -512,12 +506,8 @@
 
             if (addClass) {
                 const garbageMatch = addClass.match(/(л\/с|лс|№|лиц\/сч)/i);
-                if (garbageMatch) {
-                    addClass = addClass.substring(0, garbageMatch.index).trim();
-                }
-                if (!isValidAddClass(addClass)) {
-                    addClass = "";
-                }
+                if (garbageMatch) { addClass = addClass.substring(0, garbageMatch.index).trim(); }
+                if (!isValidAddClass(addClass)) { addClass = ""; }
             }
 
             if (dirSum === "0") return addClass;
@@ -747,10 +737,12 @@
                     let dirSum = (amOut > 0) ? "1" : "0";
                     let counterPartyAcc = (amOut > 0) ? getVal(item, "RecipAcc") : getVal(item, "SendAcc");
                     let purpose = getVal(item, "PurpPay") || getVal(item, "Purpose");
+                    // v1.41.010: защитное извлечение EDNo (если присутствует в выписке)
+                    let edNo = getVal(item, "EDNo") || getVal(item, "EDDocNo") || getVal(item, "ED_No") || "";
                     if (num && guid) {
                         const key = genKey(num, realSum);
                         if (!Data.map[key]) Data.map[key] = [];
-                        Data.map[key].push({ node: item, originalGuid: guid, operType, dirSum, counterPartyAcc, purpose: purpose, used: false });
+                        Data.map[key].push({ node: item, originalGuid: guid, operType, dirSum, counterPartyAcc, purpose: purpose, edNo: edNo, used: false });
                         count++;
                     }
                 });
@@ -796,12 +788,33 @@
             const optAdd = document.getElementById('optAddClass').checked;
             let resultPD = ""; let resultOrder = ""; let totalSum = 0; let successCount = 0;
 
+            // v1.41.010: подсчёт дубликатов по ключу — для информативного лога
+            const keyUsageCount = {};
+            for (const item of Data.docsED) {
+                try {
+                    const doc = item.xmlDoc;
+                    let ed = findEdElement(doc);
+                    if (!ed) continue;
+                    const accDoc = findNode(ed, "AccDoc");
+                    const docNo = getEdAttr(accDoc, "AccDocNo");
+                    const rawSumStr = getEdAttr(ed, "Sum");
+                    const sumRub = parseEdSum(rawSumStr) / 100;
+                    const key = genKey(docNo, sumRub);
+                    keyUsageCount[key] = (keyUsageCount[key] || 0) + 1;
+                } catch(e){}
+            }
+            for (const [k, cnt] of Object.entries(keyUsageCount)) {
+                if (cnt > 1) logger(`ℹ Дубликаты платёжек по ключу ${k}: ${cnt} шт. — используем EDNo для различения`, "warn");
+            }
+
             for (const item of Data.docsED) {
                 try {
                     const doc = item.xmlDoc;
                     let ed = findEdElement(doc);
                     if (!ed) { logger(`Пропуск ${item.name}: не найден ED элемент`, "warn"); continue; }
                     let fileGuid = getEdAttr(ed, "GUID");
+                    // v1.41.010: EDNo как уникальный идентификатор платёжки
+                    const edNo = getEdAttr(ed, "EDNo");
                     const accDoc = findNode(ed, "AccDoc");
                     const docNo = getEdAttr(accDoc, "AccDocNo");
                     const docDate = getEdAttr(accDoc, "AccDocDate");
@@ -810,12 +823,13 @@
                     const sumRub = sumKopeks / 100;
                     const key = genKey(docNo, sumRub);
                     const candidates = Data.map[key];
-                    if (!candidates) { logger(`Пропуск ED №${docNo} (${sumRub.toFixed(2)}₽): нет в выписке`, "warn"); continue; }
+                    if (!candidates) { logger(`Пропуск ED №${docNo} (${sumRub.toFixed(2)}₽, EDNo=${edNo}): нет в выписке`, "warn"); continue; }
                     const p = findNode(ed, "Payer"); const r = findNode(ed, "Payee");
                     const filePayerAcc = getEdAttr(p, "PersonalAcc"); const filePayeeAcc = getEdAttr(r, "PersonalAcc");
                     const purp = getVal(ed, "Purpose"); 
-                    const info = findBestMatch(candidates, filePayerAcc, filePayeeAcc, purp);
-                    if (!info) { logger(`Все совпадения для ED №${docNo} уже заняты`, "warn"); continue; }
+                    // v1.41.010: передаём edNo в findBestMatch для приоритетного сопоставления
+                    const info = findBestMatch(candidates, filePayerAcc, filePayeeAcc, purp, edNo);
+                    if (!info) { logger(`Все совпадения для ED №${docNo} (EDNo=${edNo}) уже заняты`, "warn"); continue; }
                     let finalGuid = fileGuid || info.originalGuid;
                     if (fileGuid) updateStatementGuid(info.node, finalGuid);
                     let foundKbk = null; if (optKbk) foundKbk = findKbkComplex(purp, info.dirSum);
@@ -826,6 +840,8 @@
                         if (optAdd) { const addKlassVal = getAddClassAndKosgu(purp, foundKbk, info.dirSum); addClassTag = makeTag("ADD_KLASS", addKlassVal); }
                     }
                     const pBank = findNode(p, "Bank"); const rBank = findNode(r, "Bank");
+                    // v1.41.010: EDNo добавлен в выходной XML как дополнительный идентификатор
+                    const edNoTag = edNo ? makeTag("EDNo", edNo) : "";
                     resultPD += `
         <Inf_PD_ITEM>
             <Nom_PP>${docNo}</Nom_PP>
